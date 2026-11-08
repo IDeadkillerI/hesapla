@@ -106,11 +106,23 @@ konsolunda **Realtime Database → Import JSON** ile içe aktarabilirsin; ancak 
   tutulur ve her açılışta veritabanıyla yeniden doğrulanır; sağ üstteki çıkış düğmesi siler.
   Yeni kullanıcı eklemek için Firebase konsolunda aynı yapıda bir düğüm oluştur
   (`passHash` = `SHA-256("printcost::" + eposta + "::" + şifre)`, eposta küçük harf).
-- **Tema:** Sağ üstteki palet düğmesi Koyu / Açık / Gece mavisi seçeneklerini açar.
-  Seçim `pc_theme` anahtarında saklanır ve `<html data-theme>` ile uygulanır.
+- **Tema:** Sağ üstteki palet düğmesi altı seçenek sunar: Koyu, Açık, Gece mavisi ve renk paletleri
+  Mat zeytin, Karbon & neon turuncu, Slate & indigo. Seçim `pc_theme` anahtarında saklanır ve
+  `<html data-theme>` ile uygulanır. Yeni palet eklemek için `style.css` sonundaki bir
+  `:root[data-theme="..."]` bloğunu kopyalayıp değişkenleri değiştirmek yeterlidir.
 - **Kenar çubuğu:** Sol üstteki düğme paneli açar/kapatır; durum `pc_sidebar` anahtarında saklanır.
 
 > **Güvenlik notu:** İstemci tarafı doğrulama, kuralların herkese açık olduğu (test modu)
 > bir veritabanında gerçek koruma sağlamaz; veritabanı adresini bilen biri doğrudan okuyabilir.
 > Gerçek erişim denetimi için Firebase Authentication'a geçip yukarıdaki kuralları
 > `auth != null` olarak uygula.
+
+## 6. Bildirimler ve grafik animasyonları
+
+- **Bildirimler:** Tüm geri bildirimler `toast()` ile sağ alt köşedeki cam efektli yığında gösterilir
+  (başarı / uyarı / hata / bilgi; otomatik kapanır, üzerine gelince durur). Silme onayları
+  tarayıcının `confirm()` penceresi yerine `confirmDialog()` ile site içi pencerede sorulur.
+  Kodda `alert`, `confirm` veya `Notification` kullanılmaz.
+- **Grafikler:** Maliyet dağılımı donut'u saat yönünde dolar, çubuklar sıfırdan büyür; enflasyon
+  fiyat çubukları aşağıdan yukarı açılır. Animasyon sayfaya her girişte ve veri değiştiğinde
+  çalışır; aynı veri tekrar gelirse yeniden oynatılmaz. `prefers-reduced-motion` açıkken animasyon atlanır.

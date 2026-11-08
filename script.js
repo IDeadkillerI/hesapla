@@ -22,6 +22,9 @@ function showPage(pageId) {
   });
   const target = document.getElementById(pageId);
   if (target) target.scrollIntoView({behavior:'smooth', block:'start'});
+  // Sayfaya her girişte grafikler sıfırdan dolar.
+  if (pageId === 'analysis' && typeof playCostChart === 'function') playCostChart(true);
+  if (pageId === 'inventory' && typeof playPriceBars === 'function') playPriceBars(true);
 }
 document.querySelectorAll('.sidebar nav a[data-page]').forEach(link => {
   link.addEventListener('click', event => {
@@ -302,12 +305,149 @@ function syncInputs() {
 function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 }
-function toast(message) {
-  const el = $('toast');
-  if (!el) return;
-  el.textContent = message; el.classList.add('show'); clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => el.classList.remove('show'), 2600);
+/* ---------- Site içi bildirimler (toast) ve onay penceresi ----------
+   Tarayıcı alert/confirm/Notification API'leri kullanılmaz. */
+const TOAST_ICONS = {
+  success:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
+  error:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.8v5M12 16.2h.01"/></svg>',
+  warning:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4 21 19.5H3L12 4Z"/><path d="M12 10v4.2M12 17h.01"/></svg>',
+  info:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 7.9h.01"/></svg>'
+};
+const TOAST_TITLES = { success:'Tamamlandı', error:'İşlem başarısız', warning:'Dikkat', info:'Bilgi' };
+function toastKind(text) {
+  if (/başarısız|yüklenemedi|okunamadı/i.test(text)) return 'error';
+  if (/kurulmadan|lütfen|önce |girmelisin|\bgir\.|\bseç\.|en fazla|çok büyük/i.test(text)) return 'warning';
+  if (/kaydedildi|eklendi|silindi|güncellendi|kaldırıldı|taşındı|buluta|buluttan|Firebase’e/i.test(text)) return 'success';
+  return 'info';
 }
+function dismissToast(el) {
+  if (!el || el.classList.contains('leaving')) return;
+  el.classList.add('leaving');
+  setTimeout(() => el.remove(), 280);
+}
+function toast(message, kind, opts) {
+  const stack = $('toastStack');
+  if (!stack) return;
+  const text = String(message ?? '');
+  const type = TOAST_ICONS[kind] ? kind : toastKind(text);
+  const duration = (opts && opts.duration) || (type === 'error' ? 5600 : 3600);
+  // Aynı mesaj üst üste yığılmasın
+  stack.querySelectorAll('.toast:not(.leaving)').forEach(item => { if (item.dataset.msg === text) dismissToast(item); });
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.dataset.msg = text;
+  el.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  el.style.setProperty('--toast-dur', `${duration}ms`);
+  el.innerHTML = `<span class="toast-icon">${TOAST_ICONS[type]}</span>
+    <div class="toast-body"><strong>${esc((opts && opts.title) || TOAST_TITLES[type])}</strong><p></p></div>
+    <button class="toast-close" type="button" aria-label="Bildirimi kapat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
+    <i class="toast-progress"></i>`;
+  el.querySelector('p').textContent = text;
+  stack.appendChild(el);
+  while (stack.querySelectorAll('.toast:not(.leaving)').length > 4) dismissToast(stack.querySelector('.toast:not(.leaving)'));
+  let remaining = duration, started = 0, timer = 0;
+  const arm = () => { started = Date.now(); timer = setTimeout(() => dismissToast(el), remaining); };
+  el.addEventListener('mouseenter', () => { clearTimeout(timer); remaining -= Date.now() - started; el.classList.add('paused'); });
+  el.addEventListener('mouseleave', () => { el.classList.remove('paused'); arm(); });
+  el.querySelector('.toast-close').addEventListener('click', () => { clearTimeout(timer); dismissToast(el); });
+  arm();
+}
+function confirmDialog(options) {
+  const o = Object.assign({ title:'Emin misin?', message:'', confirmText:'Onayla', cancelText:'Vazgeç', danger:false }, options);
+  return new Promise(resolve => {
+    const modal = $('confirmModal'), ok = $('confirmOk'), cancel = $('confirmCancel');
+    if (!modal) { resolve(false); return; }
+    const previous = document.activeElement;
+    $('confirmTitle').textContent = o.title;
+    $('confirmMessage').textContent = o.message;
+    ok.textContent = o.confirmText; cancel.textContent = o.cancelText;
+    modal.classList.toggle('is-danger', !!o.danger);
+    modal.hidden = false;
+    (o.danger ? cancel : ok).focus();
+    const finish = result => {
+      modal.hidden = true;
+      document.removeEventListener('keydown', onKey, true);
+      modal.removeEventListener('mousedown', onBackdrop);
+      ok.onclick = cancel.onclick = null;
+      if (previous && previous.focus) previous.focus();
+      resolve(result);
+    };
+    const onKey = event => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); finish(false); }
+      else if (event.key === 'Tab') {
+        event.preventDefault();
+        (document.activeElement === ok ? cancel : ok).focus();
+      }
+    };
+    const onBackdrop = event => { if (event.target === modal) finish(false); };
+    document.addEventListener('keydown', onKey, true);
+    modal.addEventListener('mousedown', onBackdrop);
+    ok.onclick = () => finish(true);
+    cancel.onclick = () => finish(false);
+  });
+}
+/* ---------- Grafik animasyonları ----------
+   Maliyet donut'u saat yönünde dolar, çubuklar sıfırdan büyür. Animasyon, sayfa
+   ilk açıldığında ve veri gerçekten değiştiğinde çalışır (aynı veri gelirse tekrarlanmaz). */
+const chartSig = {};
+const chartData = {};
+let donutRaf = 0;
+const prefersReducedMotion = () => !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+const isPageActive = id => { const el = $(id); return !!el && el.classList.contains('active'); };
+function growBars(root, selector, prop, animate) {
+  if (!root) return;
+  const els = [...root.querySelectorAll(selector)];
+  const final = el => { el.style.transitionDelay = '0ms'; el.style[prop] = `${el.dataset.v}%`; };
+  if (!animate || prefersReducedMotion()) {
+    els.forEach(el => { el.style.transition = 'none'; final(el); });
+    void root.offsetWidth;
+    els.forEach(el => { el.style.transition = ''; });
+    return;
+  }
+  els.forEach(el => { el.style.transition = 'none'; el.style.transitionDelay = '0ms'; el.style[prop] = '0%'; });
+  void root.offsetWidth;                       // 0 durumunu kesinleştir
+  requestAnimationFrame(() => els.forEach((el, i) => {
+    el.style.transition = '';
+    el.style.transitionDelay = `${i * 70}ms`;
+    el.style[prop] = `${el.dataset.v}%`;
+  }));
+}
+function paintDonut(segments, k, hasData) {
+  const donut = $('costDonut');
+  if (!donut) return;
+  if (!hasData) { donut.style.background = 'var(--donut-track)'; return; }
+  const limit = k * 100;
+  const stops = segments.map(seg => `${seg.color} ${Math.min(seg.start, limit)}% ${Math.min(seg.end, limit)}%`);
+  stops.push(`var(--donut-track) ${limit}% 100%`);
+  donut.style.background = `conic-gradient(${stops.join(',')})`;
+}
+function playCostChart(animate) {
+  const d = chartData.cost;
+  if (!d) return;
+  const segments = []; let acc = 0;
+  d.costs.forEach(([, value], index) => {
+    const pct = d.total > 0 ? value / d.total * 100 : 0;
+    segments.push({ color: d.palette[index], start: acc, end: acc + pct }); acc += pct;
+  });
+  cancelAnimationFrame(donutRaf);
+  growBars($('costBreakdown'), '.bar-fill', 'width', animate);
+  const hasData = d.total > 0;
+  if (!animate || prefersReducedMotion() || !hasData) {
+    paintDonut(segments, 1, hasData); $('costGrandTotal').textContent = money(d.total); return;
+  }
+  paintDonut(segments, 0, true);
+  $('costGrandTotal').textContent = money(0);
+  const started = performance.now(), duration = 1150;
+  const step = now => {
+    const t = Math.min(1, (now - started) / duration), eased = 1 - Math.pow(1 - t, 3);
+    paintDonut(segments, eased, true);
+    $('costGrandTotal').textContent = money(d.total * eased);
+    if (t < 1) donutRaf = requestAnimationFrame(step);
+  };
+  donutRaf = requestAnimationFrame(step);
+}
+function playPriceBars(animate) { growBars($('priceBars'), '.price-bar-fill', 'height', animate); }
+
 function productById(id) {
   return state.products.find(product => String(product.id) === String(id));
 }
@@ -466,12 +606,16 @@ function renderProducts() {
     const start = cumulative; cumulative += pct;
     return `${palette[index]} ${start}% ${cumulative}%`;
   });
-  $('costGrandTotal').textContent = money(totalCost);
-  $('costDonut').style.background = totalCost>0 ? `conic-gradient(${gradient.join(',')})` : '#eceef4';
-  $('costBreakdown').innerHTML = costs.map(([name,value],index)=>{
-    const pct = totalCost>0 ? value/totalCost*100 : 0;
-    return `<div class="break-row"><span class="break-name"><i style="background:${palette[index]}"></i>${name}</span><div class="bar-track"><div class="bar-fill" style="width:${Math.max(0,pct)}%;background:${palette[index]}"></div></div><span class="break-value">${money(value)} <small>%${fmt(pct,1)}</small></span></div>`;
-  }).join('');
+  chartData.cost = { costs, total: totalCost, palette };
+  const costSig = JSON.stringify(costs.map(item => Math.round(item[1] * 100)));
+  if (chartSig.cost !== costSig) {
+    chartSig.cost = costSig;
+    $('costBreakdown').innerHTML = costs.map(([name,value],index)=>{
+      const pct = totalCost>0 ? value/totalCost*100 : 0;
+      return `<div class="break-row"><span class="break-name"><i style="background:${palette[index]}"></i>${name}</span><div class="bar-track"><div class="bar-fill" data-v="${Math.max(0,pct).toFixed(2)}" style="width:0%;background:${palette[index]}"></div></div><span class="break-value">${money(value)} <small>%${fmt(pct,1)}</small></span></div>`;
+    }).join('');
+    playCostChart(isPageActive('analysis'));   // görünürse animasyonlu; değilse son hâliyle çiz
+  }
   renderSaleProductOptions();
   renderInventory();
   if ($('productDetailModal') && !$('productDetailModal').hidden) renderProductDetail();
@@ -600,7 +744,12 @@ function renderInventory() {
   const series = points.slice(-12).map(pt=>({label:new Date(pt.date).toLocaleDateString('tr-TR',{day:'2-digit',month:'2-digit'}),price:Number(pt.newValue)||0}));
   series.push({label:'Güncel',price:current,current:true});
   const maxPrice = Math.max(...series.map(s=>s.price),1);
-  $('priceBars').innerHTML = series.map(s=>`<div class="price-bar${s.current?' current':''}" title="${s.label}: ${money(s.price)}"><span class="price-bar-fill" style="height:${Math.max(6,(s.price/maxPrice)*100)}%"></span><small>${esc(s.label)}</small></div>`).join('');
+  const barSig = JSON.stringify(series);
+  if (chartSig.price !== barSig) {
+    chartSig.price = barSig;
+    $('priceBars').innerHTML = series.map(s=>`<div class="price-bar${s.current?' current':''}" title="${esc(s.label)}: ${money(s.price)}"><span class="price-bar-fill" data-v="${Math.max(6,(s.price/maxPrice)*100).toFixed(2)}" style="height:0%"></span><small>${esc(s.label)}</small></div>`).join('');
+    playPriceBars(isPageActive('inventory'));
+  }
 
   // --- Enflasyon tablosu ---
   const rows = [...points].reverse();
@@ -920,12 +1069,13 @@ $('productRows').addEventListener('click',event=>{
   if (button) {
     const product=productById(button.dataset.delete); if(!product)return;
     if (!cloudReady) { toast('Bulut bağlantısı kurulmadan ürün silinemez.'); return; }
-    if(confirm(`"${product.name||'Ürün'}" ürününü silmek istiyor musun? Satış geçmişindeki kayıtlar korunur.`)){
+    confirmDialog({ title:'Ürünü sil', message:`"${product.name||'Ürün'}" ürünü silinecek. Satış geçmişindeki kayıtlar korunur.`, confirmText:'Ürünü sil', danger:true }).then(ok=>{
+      if(!ok) return;
       state.products = state.products.filter(item=>String(item.id)!==String(product.id));
       renderProducts(); renderSales();
       productsRef.child(product.id).remove().catch(error=>cloudError(error,'ürün silme'));
       toast('Ürün buluttan silindi.');
-    }
+    });
     return;
   }
   // Düzenlenebilir alanlara tıklanmadıysa satırın tamamı ürün detayını açar.
@@ -939,12 +1089,13 @@ $('salesRows').addEventListener('click',event=>{
   const button=event.target.closest('[data-sale-delete]'); if(!button)return;
   const record=sales.find(s=>String(s.id)===button.dataset.saleDelete);
   if (!cloudReady) { toast('Bulut bağlantısı kurulmadan satış silinemez.'); return; }
-  if(confirm(`${record?.productName||'Bu'} satış kaydını silmek istiyor musun?`)){
+  confirmDialog({ title:'Satış kaydını sil', message:`${record?.productName||'Bu'} satış kaydı silinecek.`, confirmText:'Kaydı sil', danger:true }).then(ok=>{
+    if(!ok) return;
     sales=sales.filter(s=>String(s.id)!==button.dataset.saleDelete);
     renderSales();
     salesRef.child(button.dataset.saleDelete).remove().catch(error=>cloudError(error,'satış silme'));
     toast('Satış kaydı buluttan silindi.');
-  }
+  });
 });
 $('costHistoryRows').addEventListener('click',event=>{
   const button=event.target.closest('[data-history-delete]');
@@ -953,12 +1104,13 @@ $('costHistoryRows').addEventListener('click',event=>{
   const item=costHistory.find(entry=>String(entry.id)===String(id));
   if(!item) return;
   if (!cloudReady) { toast('Bulut bağlantısı kurulmadan kayıt silinemez.'); return; }
-  if(confirm(`${item.label} değişim kaydını silmek istiyor musun? Bu işlem geri alınamaz.`)){
+  confirmDialog({ title:'Değişim kaydını sil', message:`${item.label} değişim kaydı silinecek. Bu işlem geri alınamaz.`, confirmText:'Kaydı sil', danger:true }).then(ok=>{
+    if(!ok) return;
     costHistory=costHistory.filter(entry=>String(entry.id)!==String(id));
     renderCostHistory(); renderInventory();
     historyRef.child(id).remove().catch(error=>cloudError(error,'fiyat geçmişi silme'));
     toast('Maliyet değişim kaydı buluttan silindi.');
-  }
+  });
 });
 $('saleForm').addEventListener('submit',saveSale);
 $('stockForm').addEventListener('submit',saveStockEntry);
@@ -1143,11 +1295,13 @@ if ($('colorStockRows')) {
     if (!button) return;
     const color = button.dataset.colorRemove;
     if (!cloudReady) { toast('Bulut bağlantısı kurulmadan stok silinemez.'); return; }
-    if (!confirm(`"${color}" rengini stoktan kaldırmak istiyor musun?`)) return;
-    delete filamentStock[color];
-    deleteColorStock(color);
-    renderProducts(); renderSales(); renderInventory();
-    toast('Renk stoktan kaldırıldı.');
+    confirmDialog({ title:'Rengi stoktan kaldır', message:`"${color}" rengi stoktan kaldırılacak.`, confirmText:'Kaldır', danger:true }).then(ok=>{
+      if(!ok) return;
+      delete filamentStock[color];
+      deleteColorStock(color);
+      renderProducts(); renderSales(); renderInventory();
+      toast('Renk stoktan kaldırıldı.');
+    });
   });
 }
 
@@ -1331,7 +1485,7 @@ document.addEventListener('keydown', event => {
    Tercihler (tema, kenar çubuğu, oturum) tarayıcıda küçük anahtarlar olarak
    tutulur; iş verileri hâlâ yalnızca Firebase'dedir.
    ========================================================= */
-const THEMES = { dark:'#09090b', light:'#f4f5f7', midnight:'#050b1a' };
+const THEMES = { dark:'#09090b', light:'#f4f5f7', midnight:'#050b1a', olive:'#0b0e08', carbon:'#070707', indigo:'#0d0f18' };
 function prefGet(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
 function prefSet(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* gizli mod vb. */ } }
 function prefDel(key) { try { localStorage.removeItem(key); } catch (e) { /* yoksay */ } }
@@ -1350,7 +1504,6 @@ function applyTheme(name, animate) {
   document.querySelectorAll('[data-theme-choice]').forEach(btn =>
     btn.setAttribute('aria-checked', String(btn.dataset.themeChoice === theme)));
   prefSet('pc_theme', theme);
-  if (typeof renderAnalysis === 'function') { try { renderAnalysis(); } catch (e) { /* grafik yoksa geç */ } }
 }
 function setThemeMenu(open) {
   const menu = $('themeMenu'), btn = $('themeToggle');

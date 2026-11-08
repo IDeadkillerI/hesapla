@@ -11,10 +11,10 @@
   <script>
     (function(){try{
       var t=localStorage.getItem('pc_theme');
-      if(['dark','light','midnight'].indexOf(t)<0)t='dark';
+      if(['dark','light','midnight','olive','carbon','indigo'].indexOf(t)<0)t='dark';
       document.documentElement.setAttribute('data-theme',t);
       var m=document.querySelector('meta[name="theme-color"]');
-      if(m)m.setAttribute('content',{dark:'#09090b',light:'#f4f5f7',midnight:'#050b1a'}[t]);
+      if(m)m.setAttribute('content',{dark:'#09090b',light:'#f4f5f7',midnight:'#050b1a',olive:'#0b0e08',carbon:'#070707',indigo:'#0d0f18'}[t]);
       if(localStorage.getItem('pc_sidebar')==='collapsed')document.documentElement.setAttribute('data-sb','collapsed');
     }catch(e){document.documentElement.setAttribute('data-theme','dark')}})();
   </script>
@@ -64,10 +64,14 @@
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 20.5h-4a1.5 1.5 0 0 1-1.5-1.5V5a1.5 1.5 0 0 1 1.5-1.5h4"/><path d="M16 16.5 20.5 12 16 7.5M20.5 12H9.5"/></svg>
           </button>
           <div class="theme-menu" id="themeMenu" role="radiogroup" aria-label="Tema" hidden>
-            <p class="theme-menu-title">GÖRÜNÜM</p>
+            <p class="theme-menu-title">TEMEL TEMALAR</p>
             <button class="theme-option" type="button" role="radio" data-theme-choice="dark" aria-checked="false"><span class="theme-swatch" data-t="dark"></span><span><b>Koyu</b><small>Matte Workshop · varsayılan</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
             <button class="theme-option" type="button" role="radio" data-theme-choice="light" aria-checked="false"><span class="theme-swatch" data-t="light"></span><span><b>Açık</b><small>Ferah beyaz ve gri tonlar</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
             <button class="theme-option" type="button" role="radio" data-theme-choice="midnight" aria-checked="false"><span class="theme-swatch" data-t="midnight"></span><span><b>Gece mavisi</b><small>Yüksek kontrast · camgöbeği vurgu</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
+            <p class="theme-menu-title">RENK PALETLERİ</p>
+            <button class="theme-option" type="button" role="radio" data-theme-choice="olive" aria-checked="false"><span class="theme-swatch" data-t="olive"></span><span><b>Mat zeytin</b><small>Toprak yeşili · sakin ve mat</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
+            <button class="theme-option" type="button" role="radio" data-theme-choice="carbon" aria-checked="false"><span class="theme-swatch" data-t="carbon"></span><span><b>Karbon &amp; neon</b><small>Siyah karbon · neon turuncu</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
+            <button class="theme-option" type="button" role="radio" data-theme-choice="indigo" aria-checked="false"><span class="theme-swatch" data-t="indigo"></span><span><b>Slate &amp; indigo</b><small>Arduvaz gri · mor vurgu</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
           </div>
         </div>
       </div>
@@ -311,7 +315,18 @@
       <p class="login-foot" id="loginFoot">Hesap bilgileri Firebase Realtime Database üzerinden doğrulanır.</p>
     </div>
   </div>
-  <div class="toast" id="toast" role="status"></div>
+  <div class="toast-stack" id="toastStack" aria-live="polite" aria-relevant="additions"></div>
+  <div class="confirm-backdrop" id="confirmModal" hidden>
+    <section class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
+      <span class="confirm-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.8 12h9.4l.8-12M10 11v5M14 11v5"/></svg></span>
+      <h3 id="confirmTitle">Emin misin?</h3>
+      <p id="confirmMessage"></p>
+      <div class="confirm-actions">
+        <button class="btn btn-ghost" id="confirmCancel" type="button">Vazgeç</button>
+        <button class="btn btn-primary" id="confirmOk" type="button">Onayla</button>
+      </div>
+    </section>
+  </div>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
   <script src="firebase-config.js"></script>
