@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Baskı Maliyet Merkezi</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-icon">3D</div><div><strong>PrintCost</strong><span>Maliyet Merkezi</span></div></div>
+      <nav>
+        <a class="active" href="#production" data-page="production">▤ <span>Ürünler & Maliyetler</span></a>
+        <a href="#sales" data-page="sales">₺ <span>Satış Kayıtları</span></a>
+        <a href="#inventory" data-page="inventory">▣ <span>Envanter & Stok</span></a>
+        <a href="#device" data-page="device">◎ <span>Cihaz / ESP32</span></a>
+        <a href="#analysis" data-page="analysis">◉ <span>Maliyet Analizi</span></a>
+      </nav>
+      <div class="sidebar-note" id="cloudNote" data-status="connecting"><span class="pulse"></span><span id="cloudStatusText">Bulut bağlantısı kuruluyor…</span><small id="cloudStatusSub">Tüm veriler Google Firebase Realtime Database üzerinde saklanır.</small></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div><p class="eyebrow">ÜRETİM • MALİYET • KÂR</p><h1>3D Baskı Maliyet Merkezi</h1><p class="subtitle">Üretim giderlerini hesapla, satışlarını kaydet ve haftalık/aylık kârını takip et.</p></div>
+        <div class="top-actions"><button class="btn btn-primary" id="addProductTop">＋ Ürün ekle</button></div>
+      </header>
+
+      <div class="cloud-banner" id="cloudBanner" hidden>
+        <strong>Firebase yapılandırması gerekli.</strong>
+        <span><code>firebase-config.js</code> dosyasındaki <code>apiKey</code> ve <code>databaseURL</code> alanlarını Firebase konsolundan aldığın değerlerle doldur. Veriler ancak bundan sonra buluta yazılır.</span>
+      </div>
+
+      <section id="dashboard" class="stats-grid">
+        <article class="stat-card"><div class="stat-top"><span>Ürün çeşidi</span><span class="stat-icon purple">▦</span></div><strong id="statProducts">2</strong><small>Kayıtlı ürün</small></article>
+        <article class="stat-card"><div class="stat-top"><span>Toplam üretim</span><span class="stat-icon blue">▤</span></div><strong id="statUnits">45</strong><small>Ürün tablosundaki adet</small></article>
+        <article class="stat-card"><div class="stat-top"><span>Toplam üretim maliyeti</span><span class="stat-icon orange">₺</span></div><strong id="statCost">₺0,00</strong><small>Kayıtlı ürünlerin tahmini maliyeti</small></article>
+        <article class="stat-card"><div class="stat-top"><span>Satışlardan net kâr</span><span class="stat-icon green">↗</span></div><strong id="statProfit">₺0,00</strong><small id="statProfitCaption">Seçili satış dönemine göre</small></article>
+      </section>
+
+      <section class="page-section production-page" id="production">
+      <section class="panel" id="inputs">
+        <div class="section-heading"><div><p class="eyebrow">01 / GİRDİLER</p><h2>Maliyet parametreleri</h2><p class="muted">Değerleri değiştirdiğinde ürün maliyetleri otomatik hesaplanır.</p></div><span class="tag">Canlı hesaplama</span></div>
+        <p class="input-group-title">Temel parametreler</p>
+        <div class="inputs-grid">
+          <label class="field"><span>1 kg filament fiyatı <small>TL / kg</small></span><div class="input-wrap"><input id="filamentPrice" type="number" min="0" step="0.01" value="700"><b>₺</b></div></label>
+          <label class="field"><span>Stand gramı <small>g</small></span><div class="input-wrap"><input id="standGrams" type="number" min="0" step="0.1" value="210"><b>g</b></div></label>
+          <label class="field"><span>Çakmak paket / toplu maliyeti <small>TL</small></span><div class="input-wrap"><input id="lighterCost" type="number" min="0" step="0.01" value="400"><b>₺</b></div></label>
+          <label class="field"><span>Hedef üretim / çakmak adedi <small>adet</small></span><div class="input-wrap"><input id="targetUnits" type="number" min="1" step="1" value="48"><b>adet</b></div></label>
+        </div>
+        <p class="input-group-title">Enerji, amortisman, aşınma ve fire</p>
+        <div class="inputs-grid">
+          <label class="field"><span>Fire / başarısız baskı oranı <small>%</small></span><div class="input-wrap"><input id="wasteRate" type="number" min="0" max="90" step="0.5" value="8"><b>%</b></div></label>
+          <label class="field"><span>Yazıcı ortalama gücü <small>Watt</small></span><div class="input-wrap"><input id="printerPower" type="number" min="0" step="1" value="120"><b>W</b></div></label>
+          <label class="field"><span>Elektrik birim fiyatı <small>TL / kWh</small></span><div class="input-wrap"><input id="energyPrice" type="number" min="0" step="0.01" value="2.6"><b>₺</b></div></label>
+          <label class="field"><span>Yazıcı / donanım bedeli <small>TL</small></span><div class="input-wrap"><input id="printerPrice" type="number" min="0" step="1" value="18000"><b>₺</b></div></label>
+          <label class="field"><span>Beklenen çalışma ömrü <small>saat</small></span><div class="input-wrap"><input id="printerLifeHours" type="number" min="1" step="100" value="5000"><b>sa</b></div></label>
+          <label class="field"><span>Bakım & yedek parça fonu <small>nozzle, PTFE, PEI, fan · TL / saat</small></span><div class="input-wrap"><input id="wearCost" type="number" min="0" step="0.01" value="1.5"><b>₺</b></div></label>
+        </div>
+        <div class="formula-strip"><span>Filament gram fiyatı <strong id="gramPrice">₺0,70 / g</strong></span><span>Standın toplam filament maliyeti <strong id="standTotal">₺147,00</strong></span><span>Çakmak başına maliyet <strong id="lighterUnit">₺8,33</strong></span><span>Fire çarpanı <strong id="wasteFactor">×1,08</strong></span><span>Saatlik enerji <strong id="hourlyEnergy">₺0,31 / saat</strong></span><span>Saatlik amortisman <strong id="hourlyDep">₺3,60 / saat</strong></span><span>Saatlik aşınma <strong id="hourlyWear">₺1,50 / saat</strong></span></div>
+        <p class="note input-note">Süreye bağlı giderler adet başına hesaplanır: <strong>(baskı süresi ÷ adet) × saatlik birim maliyet</strong>. Elektrikte saatlik maliyet <strong>yazıcı gücü (kW) × kWh fiyatı</strong>, amortismanda <strong>yazıcı bedeli ÷ beklenen ömür</strong>, aşınmada <strong>bakım fonu (TL/saat)</strong> kullanılır. Baskı süresi girilmeyen ürünlerde bu kalemler sıfır sayılır.</p>
+      </section>
+
+      <section class="panel" id="products">
+        <div class="section-heading product-heading"><div><p class="eyebrow">02 / ÜRÜNLER</p><h2>Ürün maliyet tablosu</h2><p class="muted">Adet, toplam gram, partinin toplam baskı süresi ve satış fiyatını gir. Süreye bağlı giderler adede bölünerek birim maliyet ve tahmini kâr otomatik hesaplanır.</p></div><button class="btn btn-primary" id="addProduct">＋ Yeni ürün</button></div>
+        <div class="table-toolbar"><div class="searchbox">⌕ <input id="searchInput" placeholder="Ürün ara..."></div><span class="muted" id="rowCount">2 ürün</span></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Fotoğraf</th><th>Ürün adı</th><th>Adet</th><th>Toplam gram</th><th>Baskı süresi (saat)</th><th>Gram / adet</th><th>Filament / adet</th><th>Elektrik / adet</th><th>Stand / adet</th><th>Amortisman / adet</th><th>Aşınma / adet</th><th>Fire payı / adet</th><th>Çakmak / adet</th><th>Birim maliyet</th><th>Satış fiyatı</th><th>Birim kâr</th><th>Stokla basılabilir</th><th>Toplam maliyet</th><th></th></tr></thead>
+          <tbody id="productRows"></tbody>
+        </table></div>
+        <div class="table-footer"><span>Ürünler Firebase Realtime Database'de canlı olarak saklanır ve tüm cihazlara anlık yansır.</span><strong id="totalFooter">Toplam maliyet: ₺0,00</strong></div>
+      </section>
+
+      </section>
+
+      <section class="page-section panel sales-panel" id="sales">
+        <div class="section-heading"><div><p class="eyebrow">03 / SATIŞ TAKİBİ</p><h2>Satış kaydı ekle</h2><p class="muted">Her satış ayrı kaydedilir. Kayıt anındaki birim maliyet saklandığı için geçmiş kâr hesabı sonradan değişmez.</p></div><span class="tag">Otomatik kaydetme</span></div>
+        <form id="saleForm" class="sales-form">
+          <label class="field"><span>Satılan ürün</span><select id="saleProduct" required></select></label>
+          <label class="field"><span>Adet</span><input id="saleQty" type="number" min="1" step="1" value="1" required></label>
+          <label class="field"><span>Birim satış fiyatı (TL)</span><input id="salePrice" type="number" min="0" step="0.01" value="0" required></label>
+          <label class="field"><span>Satış tarihi</span><input id="saleDate" type="date" required></label>
+          <label class="field sale-note-field"><span>Not (isteğe bağlı)</span><input id="saleNote" type="text" maxlength="120" placeholder="Örn. Instagram siparişi"></label>
+          <button class="btn btn-primary sale-submit" type="submit">＋ Satışı kaydet</button>
+        </form>
+        <div class="sales-stats">
+          <article><span>Satış adedi</span><strong id="salesUnits">0</strong></article>
+          <article><span>Toplam ciro</span><strong id="salesRevenue">₺0,00</strong></article>
+          <article><span>Satılan ürün maliyeti</span><strong id="salesCost">₺0,00</strong></article>
+          <article><span>Net kâr</span><strong id="salesProfit">₺0,00</strong></article>
+        </div>
+        <div class="sales-toolbar">
+          <div><label for="salesPeriod">Kayıt dönemi</label><select id="salesPeriod"><option value="week">Bu hafta</option><option value="month" selected>Bu ay</option><option value="all">Tüm kayıtlar</option></select></div>
+          <span id="salesRange" class="muted"></span>
+        </div>
+        <div class="table-wrap"><table class="sales-table">
+          <thead><tr><th>Tarih</th><th>Ürün</th><th>Adet</th><th>Birim fiyat</th><th>Ciro</th><th>Birim maliyet</th><th>Toplam maliyet</th><th>Net kâr</th><th>Not</th><th>Detay</th><th></th></tr></thead>
+          <tbody id="salesRows"></tbody>
+        </table></div>
+        <div id="salesEmpty" class="empty-state">Henüz satış kaydı yok. İlk satışını yukarıdaki formdan ekleyebilirsin.</div>
+        <div class="history-heading"><div><h3>Maliyet değişim geçmişi</h3><p class="muted">Filament, elektrik, çakmak ve diğer parametrelerin hangi tarihte değiştiğini gösterir.</p></div><span class="tag">Buluta otomatik kayıt</span></div>
+        <div class="table-wrap"><table class="history-table"><thead><tr><th>Tarih / saat</th><th>Değişen değer</th><th>Önceki değer</th><th>Yeni değer</th><th>İşlem</th></tr></thead><tbody id="costHistoryRows"></tbody></table></div>
+        <div id="historyEmpty" class="empty-state">Henüz maliyet değişikliği kaydedilmedi. Bir parametreyi değiştirip alandan çıktığında geçmişe eklenir.</div>
+      </section>
+
+      <section class="page-section inventory-page" id="inventory">
+        <section class="panel">
+          <div class="section-heading">
+            <div><p class="eyebrow">04 / ENVANTER</p><h2>Filament stok ve üretim kapasitesi</h2><p class="muted">Depodaki filament miktarına göre her üründen kaç adet basabileceğini gösterir. Fire oranı hesaba katılır.</p></div>
+            <span class="tag" id="stockTag">Stok takibi</span>
+          </div>
+          <div class="inputs-grid inventory-inputs">
+            <label class="field"><span>Depodaki filament <small>kg</small></span><div class="input-wrap"><input id="filamentStockKg" type="number" min="0" step="0.1" value="0"><b>kg</b></div></label>
+            <label class="field"><span>Kritik stok uyarı eşiği <small>kg</small></span><div class="input-wrap"><input id="minStockKg" type="number" min="0" step="0.1" value="2"><b>kg</b></div></label>
+          </div>
+          <div class="stock-cards">
+            <article><span>Mevcut stok</span><strong id="stockCurrent">0 kg</strong><small>Hammadde</small></article>
+            <article><span>Plan için gerekli</span><strong id="stockNeeded">0 kg</strong><small>Fire dahil</small></article>
+            <article><span>Plan sonrası kalan</span><strong id="stockRemaining">0 kg</strong><small>Bakiye</small></article>
+            <article><span>Darboğaz ürün</span><strong id="stockBottleneck">—</strong><small id="stockBottleneckNote">Stok sınırı</small></article>
+          </div>
+          <div id="stockAlerts" class="alert-list"></div>
+          <div class="table-wrap"><table class="stock-table">
+            <thead><tr><th>Ürün</th><th>Gram / adet</th><th>Fire dahil gram</th><th>Plan adet</th><th>Stokla basılabilir</th><th>Plan için filament</th><th>Durum</th></tr></thead>
+            <tbody id="stockRows"></tbody>
+          </table></div>
+          <div id="stockEmpty" class="empty-state">Henüz ürün yok. Ürünler sayfasından ürün ekleyebilirsin.</div>
+          <div class="stock-buy">
+            <h3>Stok girişi / filament alımı</h3>
+            <p class="muted">Aldığın filament miktarını ve fiyatını gir. Fiyat güncel fiyattan farklıysa enflasyon takipçisine otomatik kaydedilir.</p>
+            <form id="stockForm" class="sales-form">
+              <label class="field"><span>Alınan miktar (kg)</span><input id="stockAddKg" type="number" min="0.01" step="0.1" value="1" required></label>
+              <label class="field"><span>Alım fiyatı (TL / kg)</span><input id="stockAddPrice" type="number" min="0" step="0.01" value="700" required></label>
+              <label class="field"><span>Alım tarihi</span><input id="stockAddDate" type="date" required></label>
+              <button class="btn btn-primary" type="submit">＋ Stoğa ekle</button>
+            </form>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="section-heading">
+            <div><p class="eyebrow">05 / ENFLASYON</p><h2>Hammadde maliyet enflasyonu</h2><p class="muted">Filament alım fiyatların zaman içinde nasıl değişti ve aynı üretim planını nasıl etkiledi?</p></div>
+            <span class="tag">Canlı fiyat geçmişi</span>
+          </div>
+          <div class="stock-cards inflation-cards">
+            <article><span>İlk kayıtlı fiyat</span><strong id="inflFirst">—</strong><small id="inflFirstDate">Kayıt yok</small></article>
+            <article><span>Güncel fiyat</span><strong id="inflCurrent">—</strong><small>TL / kg</small></article>
+            <article><span>Değişim</span><strong id="inflChange">—</strong><small id="inflChangeNote">İlk kayda göre</small></article>
+            <article><span>Plan maliyet etkisi</span><strong id="inflImpact">—</strong><small>Mevcut üretim planında</small></article>
+          </div>
+          <div class="price-bars" id="priceBars"></div>
+          <div class="table-wrap"><table class="history-table">
+            <thead><tr><th>Tarih</th><th>Kaynak</th><th>Önceki fiyat</th><th>Yeni fiyat</th><th>Değişim</th><th>Not</th></tr></thead>
+            <tbody id="inflationRows"></tbody>
+          </table></div>
+          <div id="inflationEmpty" class="empty-state">Henüz fiyat kaydı yok. Stok girişi yaparak veya filament fiyatını değiştirerek geçmiş oluşturabilirsin.</div>
+        </section>
+      </section>
+
+      <section class="page-section device-page" id="device">
+        <section class="panel">
+          <div class="section-heading">
+            <div><p class="eyebrow">06 / BAĞLI CİHAZ</p><h2>ESP32 canlı bağlantısı</h2><p class="muted">Cihaz internete bağlı olduğu sürece telemetriyi buluttan canlı okur, röle ve hedef sıcaklık komutlarını anında alır. Hangi ağda olduğun önemli değil.</p></div>
+            <span class="tag" id="deviceStatusTag">Cihaz bekleniyor</span>
+          </div>
+          <div class="stock-cards device-cards">
+            <article><span>Cihaz durumu</span><strong id="deviceStatusValue">—</strong><small id="deviceLastSeen">Henüz veri yok</small></article>
+            <article><span>IP adresi</span><strong id="deviceIp">—</strong><small id="deviceFirmware">ESP32</small></article>
+            <article><span>Wi-Fi sinyali</span><strong id="deviceRssi">—</strong><small>dBm</small></article>
+            <article><span>Çalışma süresi</span><strong id="deviceUptime">—</strong><small>Son açılıştan beri</small></article>
+          </div>
+          <div class="device-grid">
+            <div class="device-card">
+              <h3>Uzaktan kontrol</h3>
+              <p class="muted">Komutlar <code>printcost/device/control</code> düğümüne yazılır; ESP32 döngüsü bunları okuyup uygular.</p>
+              <div class="device-control-row">
+                <div><span class="device-label">Röle / dijital çıkış</span><small id="deviceRelayHint">Komut gönderilmedi</small></div>
+                <button class="device-toggle" id="deviceRelayToggle" type="button" aria-pressed="false">Kapalı</button>
+              </div>
+              <div class="device-control-row">
+                <div><span class="device-label">Hedef sıcaklık</span><small>°C · ESP32 bu değeri kendi kontrol mantığında kullanır</small></div>
+                <div class="input-wrap device-temp-input"><input id="deviceTargetTemp" type="number" min="0" max="300" step="1" value="0"><b>°C</b></div>
+              </div>
+              <div class="device-control-row">
+                <div><span class="device-label">Bağlantı testi</span><small>Cihazın komut kuyruğuna ping gönderir</small></div>
+                <button class="btn btn-light" id="devicePingBtn" type="button">↻ Ping gönder</button>
+              </div>
+            </div>
+            <div class="device-card">
+              <h3>Canlı telemetri</h3>
+              <p class="muted">ESP32'nin buluta yazdığı son ölçümler. Sayfa açıkken saniyeler içinde güncellenir.</p>
+              <div class="telemetry-grid">
+                <article><span>Sıcaklık</span><strong id="deviceTempValue">—</strong><small>°C</small></article>
+                <article><span>Nem</span><strong id="deviceHumidityValue">—</strong><small>%</small></article>
+                <article><span>Filament sensörü</span><strong id="deviceFilamentValue">—</strong><small>optik sensör</small></article>
+                <article><span>Son ölçüm</span><strong id="deviceTelemetryTime">—</strong><small>bulut kaydı</small></article>
+              </div>
+              <p class="note">Telemetri düğümü: <code>printcost/device/telemetry</code> · Kontrol düğümü: <code>printcost/device/control</code> · Komut: <code>printcost/device/command</code></p>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section class="page-section analysis-page" id="analysis">
+        <div class="section-heading"><div><p class="eyebrow">06 / DETAYLI ANALİZ</p><h2>Maliyet analizi</h2><p class="muted">Maliyet dağılımı ve hesaplama açıklamaları bu ayrı bölümde yer alır.</p></div><span class="tag">Canlı analiz</span></div>
+        <div class="analysis-grid">
+          <article class="panel chart-panel"><div class="section-heading"><div><p class="eyebrow">GİDERLER</p><h2>Maliyet dağılımı</h2></div></div><div class="cost-visual"><div id="costDonut" class="cost-donut"><div class="donut-center"><strong id="costGrandTotal">₺0,00</strong><span>Toplam maliyet</span></div></div><div id="costBreakdown" class="breakdown"></div></div></article>
+          <article class="panel tips-panel"><div class="section-heading"><div><p class="eyebrow">BİLGİ</p><h2>Hesaplama notları</h2></div><span class="stat-icon green">✓</span></div><ul><li>Filament maliyeti, ürünün gram/adet değeri üzerinden hesaplanır.</li><li>Elektrik maliyeti adet başına <strong>(baskı süresi ÷ adet) × (yazıcı gücü ÷ 1000) × kWh fiyatı</strong> olarak hesaplanır; toplam sürenin adede düşen payı esas alınır.</li><li>Amortisman adet başına <strong>(baskı süresi ÷ adet) × (yazıcı bedeli ÷ beklenen ömür)</strong>, aşınma ise <strong>(baskı süresi ÷ adet) × bakım fonu</strong> formülüyle hesaplanır. Bakım fonu nozzle, PTFE, PEI, ekstruder dişlisi ve fan giderlerini kapsar. Baskı süresi girilmeyen ürünlerde bu üç kalem sıfırdır.</li><li>Fire payı, başarısız baskılar için filament, stand ve enerji maliyetinin üzerine <strong>(1 + fire oranı)</strong> çarpanıyla eklenir.</li><li>Stand maliyeti, stand filamentinin toplam maliyetinin ilgili ürün adedine bölünmesiyle hesaplanır.</li><li>Çakmak maliyeti, hedef üretim adedine bölünerek tüm ürünlere uygulanır.</li><li>Envanter sayfası, depodaki filamentle kaç adet ürün basılabileceğini fire dahil hesaplar; stok girişleri ve fiyat değişimleri enflasyon takipçisine işlenir.</li><li>Satış kaydında ciro, maliyet ve kâr saklanır; haftalık ve aylık özetler seçilen döneme göre güncellenir.</li></ul><p class="note">Tüm ürünler, satışlar, maliyet parametreleri ve fiyat geçmişi Google Firebase Realtime Database'de saklanır. Başka bir cihazdan veya mobil veriyle girdiğinde aynı veriler onValue dinleyicisiyle anlık olarak yüklenir; tarayıcı hafızası kullanılmaz.</p></article>
+        </div>
+      </section>
+      <footer>PrintCost · 3D baskı maliyet hesaplayıcı <span>Veriler Firebase bulutunda saklanır</span></footer>
+    </main>
+  </div>
+  <div class="modal-backdrop" id="saleDetailModal" hidden>
+    <section class="detail-modal" role="dialog" aria-modal="true" aria-labelledby="saleDetailTitle">
+      <div class="detail-modal-head"><div><p class="eyebrow">SATIŞ ARŞİVİ</p><h2 id="saleDetailTitle">Satışın fiyatlandırma detayları</h2></div><button class="modal-close" id="closeSaleDetail" type="button" aria-label="Kapat">×</button></div>
+      <p id="saleDetailSubtitle" class="muted"></p>
+      <div id="saleDetailContent"></div>
+    </section>
+  </div>
+  <div class="lightbox" id="photoLightbox" hidden role="dialog" aria-modal="true" aria-label="Fotoğraf görüntüleyici">
+    <div class="lightbox-backdrop" data-lightbox-close></div>
+    <div class="lightbox-stage">
+      <div class="lightbox-toolbar">
+        <div class="lightbox-info"><span class="lightbox-count" id="lightboxCount">1 / 1</span><strong id="lightboxTitle"></strong></div>
+        <div class="lightbox-actions">
+          <button class="lightbox-icon-btn" id="lightboxZoomOut" type="button" aria-label="Uzaklaştır" title="Uzaklaştır (−)">−</button>
+          <button class="lightbox-zoom-label" id="lightboxZoomReset" type="button" aria-label="Yakınlaştırmayı sıfırla" title="Sıfırla (0)">%100</button>
+          <button class="lightbox-icon-btn" id="lightboxZoomIn" type="button" aria-label="Yakınlaştır" title="Yakınlaştır (+)">＋</button>
+          <button class="lightbox-icon-btn lightbox-close" id="lightboxClose" type="button" aria-label="Kapat" title="Kapat (Esc)">×</button>
+        </div>
+      </div>
+      <button class="lightbox-nav prev" id="lightboxPrev" type="button" aria-label="Önceki fotoğraf" title="Önceki (←)">‹</button>
+      <div class="lightbox-canvas" id="lightboxCanvas">
+        <img class="lightbox-image" id="lightboxImage" alt="" draggable="false">
+        <span class="lightbox-hint" id="lightboxHint">Yakınlaştırmak için tıkla · Sürükleyerek gezin</span>
+      </div>
+      <button class="lightbox-nav next" id="lightboxNext" type="button" aria-label="Sonraki fotoğraf" title="Sonraki (→)">›</button>
+      <div class="lightbox-thumbs" id="lightboxThumbs"></div>
+    </div>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
