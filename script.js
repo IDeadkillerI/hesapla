@@ -5,7 +5,7 @@ const $ = id => document.getElementById(id);
  * BULUT MİMARİSİ
  * Tüm kalıcı veriler Firebase Realtime Database üzerinde tutulur.
  * Yerel dosya veya tarayıcı hafızası kullanılmaz.
- * Veri yolu: printcost/{params|products|sales|costHistory|device}
+ * Veri yolu: printcost/{params|filamentStock|products|sales|costHistory}
  * ========================================================= */
 const CLOUD_ROOT = 'printcost';
 
@@ -32,7 +32,7 @@ document.querySelectorAll('.sidebar nav a[data-page]').forEach(link => {
 });
 
 const inputIds = ['filamentPrice','standGrams','lighterCost','targetUnits','wasteRate','printerPower','energyPrice','printerPrice','printerLifeHours','wearCost'];
-const stockInputIds = ['filamentStockKg','minStockKg'];
+const stockInputIds = ['minStockKg'];
 const defaults = {
   filamentPrice:700, standGrams:210, lighterCost:400, targetUnits:48,
   wasteRate:8, printerPower:120, energyPrice:2.6, printerPrice:18000, printerLifeHours:5000, wearCost:1.5,
@@ -42,7 +42,11 @@ const clone = value => JSON.parse(JSON.stringify(value));
 let state = {...clone(defaults), products: []};
 let sales = [];
 let costHistory = [];
-let deviceState = {};
+// Renk adı → depodaki kilogram. Ayrı bir bulut düğümünde (printcost/filamentStock) tutulur.
+let filamentStock = {};
+let filamentStockLoaded = false;
+let legacyStockChecked = false;
+let detailProductId = null;
 let lastCommittedParams = clone(defaults);
 const dirtyParamKeys = new Set();
 let cloudReady = false;
@@ -53,7 +57,7 @@ let paramsRef = null;
 let productsRef = null;
 let salesRef = null;
 let historyRef = null;
-let deviceRef = null;
+let filamentStockRef = null;
 
 /* ---------- Firebase başlatma ve canlı dinleyiciler ---------- */
 function setCloudStatus(mode, text, sub) {
@@ -91,7 +95,7 @@ function initFirebase() {
     productsRef = rootRef.child('products');
     salesRef = rootRef.child('sales');
     historyRef = rootRef.child('costHistory');
-    deviceRef = rootRef.child('device');
+    filamentStockRef = rootRef.child('filamentStock');
     cloudReady = true;
     const banner = $('cloudBanner');
     if (banner) banner.hidden = true;
@@ -119,7 +123,7 @@ function attachCloudListeners() {
       return;
     }
     const remote = snap.val() || {};
-    [...inputIds, ...stockInputIds].forEach(key => {
+    [...inputIds, ...stockInputIds, 'filamentStockKg'].forEach(key => {
       const value = Number(remote[key]);
       const safe = Number.isFinite(value) ? value : defaults[key];
       const el = $(key);
@@ -141,6 +145,7 @@ function attachCloudListeners() {
         if (!dirtyParamKeys.has(key)) lastCommittedParams[key] = state[key];
       });
     }
+    maybeMigrateLegacyStock();
     renderProducts();
     renderSales();
     renderInventory();
@@ -174,11 +179,26 @@ function attachCloudListeners() {
     renderInventory();
   }, error => cloudError(error, 'fiyat geçmişini okuma'));
 
-  // ESP32 cihaz durumu, telemetrisi ve kontrol düğümleri
-  deviceRef.on('value', snap => {
-    deviceState = snap.val() || {};
-    renderDevice();
-  }, error => cloudError(error, 'cihaz verisini okuma'));
+  // Renk bazlı filament stoğu: her renk ayrı anahtar olarak tutulur (kg).
+  filamentStockRef.on('value', snap => {
+    filamentStock = snap.val() || {};
+    filamentStockLoaded = true;
+    maybeMigrateLegacyStock();
+    renderProducts();
+    renderInventory();
+  }, error => cloudError(error, 'filament stoğunu okuma'));
+}
+
+// Eski tek değerli filamentStockKg kaydı varsa "Genel" rengine taşınır.
+function maybeMigrateLegacyStock() {
+  if (legacyStockChecked || !filamentStockLoaded || !paramsInitialized) return;
+  legacyStockChecked = true;
+  const legacyKg = Math.max(0, Number(state.filamentStockKg) || 0);
+  if (!Object.keys(filamentStock).length && legacyKg > 0 && cloudReady) {
+    filamentStockRef.child('Genel').set(legacyKg)
+      .then(() => toast('Eski tek renk stok kaydı "Genel" rengine taşındı.'))
+      .catch(error => cloudError(error, 'eski stok taşıma'));
+  }
 }
 
 /* ---------- Yazma yardımcıları ---------- */
@@ -202,10 +222,15 @@ function writeProductItem(id, fields) {
   if (!cloudReady || !id) return;
   productsRef.child(id).update(fields).catch(error => cloudError(error, 'ürünü güncelleme'));
 }
-function writeDeviceControl(fields) {
-  if (!cloudReady) { toast('Bulut bağlantısı kurulmadan cihaz kontrol edilemez.'); return; }
-  deviceRef.child('control').update({...fields, updatedAt: Date.now()})
-    .catch(error => cloudError(error, 'cihaz komutu'));
+function writeColorStock(color, kg) {
+  if (!cloudReady) { toast('Bulut bağlantısı kurulmadan stok kaydedilemez.'); return Promise.reject(new Error('offline')); }
+  const safe = Math.max(0, Number(kg) || 0);
+  return filamentStockRef.child(color).set(Math.round(safe * 1000) / 1000)
+    .catch(error => { cloudError(error, 'renk stoğu'); throw error; });
+}
+function deleteColorStock(color) {
+  if (!cloudReady) { toast('Bulut bağlantısı kurulmadan stok silinemez.'); return; }
+  filamentStockRef.child(color).remove().catch(error => cloudError(error, 'renk stoğu silme'));
 }
 
 /* ---------- Genel yardımcılar ---------- */
@@ -249,8 +274,9 @@ function calc(product, x=params()) {
   const gramPrice = x.filamentPrice/1000;
   const rates = hourlyRates(x);
   const wasteShare = rates.wasteShare;
-  // Filament ve stand gram üzerinden; süreye bağlı giderler adet başına düşen baskı süresi üzerinden.
-  const filament = qty > 0 ? (grams/qty)*gramPrice : 0;
+  // Filament: üründe tanımlı renklerin adet başına gram toplamı (yoksa toplam gram ÷ adet).
+  const perUnitGrams = unitGrams(product);
+  const filament = perUnitGrams*gramPrice;
   const stand = qty > 0 ? (x.standGrams*gramPrice)/qty : 0;
   // Adet başına baskı süresi. Elektrik, amortisman ve aşınma bu süreyle çarpılır:
   // elektrik = (süre ÷ adet) × (yazıcı gücü ÷ 1000) × kWh fiyatı
@@ -264,7 +290,7 @@ function calc(product, x=params()) {
   const unit = filament+electric+stand+machine+wear+fire+lighter;
   const sale = Math.max(0,Number(product.sale)||0);
   const profit = sale-unit;
-  return {gram:qty>0?grams/qty:0,hours,filament,electric,stand,machine,wear,fire,lighter,unit,profit,total:unit*qty,totalProfit:profit*qty};
+  return {gram:perUnitGrams,hours,filament,electric,stand,machine,wear,fire,lighter,unit,profit,total:unit*qty,totalProfit:profit*qty};
 }
 function syncInputs() {
   inputIds.forEach(id => { if ($(id)) $(id).value = state[id] ?? defaults[id]; });
@@ -282,27 +308,102 @@ function toast(message) {
 function productById(id) {
   return state.products.find(product => String(product.id) === String(id));
 }
-// Depodaki filamentle basılabilecek adet ve plan ihtiyacı (fire dahil).
+/* ---------- Renk yardımcıları ---------- */
+// Firebase dizileri seyrek gelebilir; hem dizi hem nesne biçimini destekle.
+function rawColors(product) {
+  const value = product?.colors;
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === 'object') return Object.values(value);
+  return [];
+}
+// Ürünün renkleri, adet başına gram olarak.
+function productColors(product) {
+  return rawColors(product)
+    .map(color => ({name: String(color?.name ?? '').trim(), grams: Math.max(0, Number(color?.grams) || 0)}))
+    .filter(color => color.name || color.grams > 0);
+}
+function hasColors(product) {
+  return productColors(product).length > 0;
+}
+function unitGrams(product) {
+  const colors = productColors(product);
+  if (colors.length) return colors.reduce((sum, color) => sum + color.grams, 0);
+  const qty = Math.max(0, Number(product.qty) || 0);
+  const grams = Math.max(0, Number(product.grams) || 0);
+  return qty > 0 ? grams / qty : 0;
+}
+function sanitizeColorName(name) {
+  return String(name ?? '').trim().replace(/[.#$\[\]\/]/g, '').replace(/\s+/g, ' ').slice(0, 24);
+}
+const COLOR_SWATCHES = {
+  siyah:'#232936', beyaz:'#ffffff', gri:'#9aa2b1', gümüş:'#c6ccd6', altın:'#d4af37',
+  kırmızı:'#d94b4b', mavi:'#3f7edb', yeşil:'#2fa56e', sarı:'#e8c537', turuncu:'#e8892f',
+  mor:'#8b5cd6', pembe:'#e878a8', kahverengi:'#8a5a3b', bordo:'#7d2f3d',
+  turkuaz:'#2fb6b0', lacivert:'#2c3e7d', bej:'#d8c3a5', şeffaf:'#e9edf4'
+};
+function colorSwatch(name) {
+  const key = String(name || '').toLocaleLowerCase('tr-TR').trim();
+  if (COLOR_SWATCHES[key]) return COLOR_SWATCHES[key];
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) % 360;
+  return `hsl(${hash} 62% 56%)`;
+}
+// Renk stoğu + ürün planlarını birleştirip renk bazlı özet üretir.
 function stockCalc(x=params()) {
   const waste = 1 + Math.min(90,Math.max(0,x.wasteRate))/100;
-  const stockKg = Math.max(0, Number(state.filamentStockKg)||0);
-  const items = state.products.map(p => {
-    const qty = Math.max(0,Number(p.qty)||0);
-    const grams = Math.max(0,Number(p.grams)||0);
-    const gpu = qty>0 ? grams/qty : 0;
-    const standGpu = qty>0 ? x.standGrams/qty : 0;
-    const effGpu = (gpu+standGpu)*waste;
-    const producible = effGpu>0 ? Math.floor(stockKg*1000/effGpu) : 0;
-    const plannedKg = (grams+x.standGrams)*waste/1000;
-    return {p,qty,grams,gpu,standGpu,effGpu,producible,plannedKg,shortfall:Math.max(0,qty-producible)};
+  const stockByColor = {};
+  Object.entries(filamentStock || {}).forEach(([name, kg]) => {
+    const safeName = sanitizeColorName(name);
+    if (!safeName) return;
+    stockByColor[safeName] = (stockByColor[safeName] || 0) + Math.max(0, Number(kg) || 0);
   });
+  const stockKg = Object.values(stockByColor).reduce((sum, kg) => sum + kg, 0);
+
+  const items = state.products.map(p => {
+    const qty = Math.max(0, Number(p.qty) || 0);
+    const grams = Math.max(0, Number(p.grams) || 0);
+    const colors = productColors(p);
+    const gpu = unitGrams(p);
+    const colored = colors.length > 0;
+    // Renk tanımlıysa her renk için ayrı ihtiyaç ve kapasite hesaplanır.
+    const colorUse = colors.map(color => {
+      const stockOfColor = stockByColor[color.name] || 0;
+      const perUnitKg = color.grams * waste / 1000;
+      const producible = perUnitKg > 0 ? Math.floor(stockOfColor / perUnitKg + 1e-9) : 0;
+      return {
+        name: color.name || 'Renk adı yok', gramsPerUnit: color.grams,
+        gramsTotal: color.grams * qty, stockKg: stockOfColor,
+        plannedKg: color.grams * qty * waste / 1000, producible
+      };
+    });
+    const effGpu = gpu * waste;
+    let producible;
+    if (colored) {
+      const usable = colorUse.filter(color => color.gramsPerUnit > 0);
+      producible = usable.length ? Math.min(...usable.map(color => color.producible)) : 0;
+    } else {
+      producible = effGpu > 0 ? Math.floor(stockKg / (effGpu / 1000) + 1e-9) : 0;
+    }
+    const plannedKg = colored
+      ? colorUse.reduce((sum, color) => sum + color.plannedKg, 0)
+      : grams * waste / 1000;
+    return {p, qty, grams, gpu, colored, colorUse, effGpu, producible, plannedKg, shortfall: Math.max(0, qty - producible)};
+  });
+
+  // Renk bazlı stok tablosu: stokta olan ve ürünlerde kullanılan tüm renkler.
+  const colorNames = new Set([...Object.keys(stockByColor), ...items.flatMap(item => item.colorUse.map(color => color.name))]);
+  const colorRows = [...colorNames].map(name => {
+    const neededKg = items.reduce((sum, item) => sum + item.colorUse.filter(color => color.name === name).reduce((s, color) => s + color.plannedKg, 0), 0);
+    const stockOfColor = stockByColor[name] || 0;
+    return {name, stockKg: stockOfColor, neededKg, remaining: stockOfColor - neededKg};
+  }).sort((a, b) => a.remaining - b.remaining || a.name.localeCompare(b.name, 'tr'));
+
   const neededKg = items.reduce((sum,item)=>sum+item.plannedKg,0);
-  return {stockKg,neededKg,remaining:stockKg-neededKg,items,minStockKg:Math.max(0,Number(state.minStockKg)||0),waste};
+  return {stockKg,neededKg,remaining:stockKg-neededKg,items,colorRows,minStockKg:Math.max(0,Number(state.minStockKg)||0),waste,wasteRate:x.wasteRate};
 }
 function renderProducts() {
   const x = params();
   const rates = hourlyRates(x);
-  const stock = stockCalc(x);
   $('gramPrice').textContent = `${money(x.filamentPrice/1000)} / g`;
   $('standTotal').textContent = money(x.standGrams*x.filamentPrice/1000);
   $('lighterUnit').textContent = money(x.lighterCost/x.targetUnits);
@@ -316,22 +417,25 @@ function renderProducts() {
     p.usesLighter = Boolean(p.usesLighter);
     if (!String(p.name ?? '').toLocaleLowerCase('tr-TR').includes(query)) return;
     const c = calc(p,x);
-    const stockItem = stock.items.find(item => item.p.id === p.id);
-    const producible = stockItem ? stockItem.producible : 0;
-    const stockClass = stockItem && stockItem.shortfall>0 ? 'stock-short' : 'stock-ok';
+    const colors = productColors(p);
+    const colorCell = colors.length
+      ? `<div class="color-chip-list">${colors.map(color => `<span class="color-chip" title="${esc(color.name || 'Renk')} · adet başına ${fmt(color.grams,1)} g"><i style="background:${colorSwatch(color.name)}"></i>${esc(color.name || 'Renk')} <small>${fmt(color.grams,1)} g</small></span>`).join('')}</div>`
+      : '<span class="muted-chip">Renk tanımlanmadı</span>';
     const tr = document.createElement('tr');
+    tr.className = 'product-row';
+    tr.dataset.productRow = p.id;
+    tr.title = 'Ürün detayı için tıkla';
     tr.innerHTML = `
-      <td class="photo-cell"><div class="product-photo-wrap">${p.photo ? `<button class="product-photo-btn" type="button" data-photo-open="${esc(p.id)}" aria-label="${esc(p.name)} fotoğrafını büyüt" title="Büyütmek için tıkla"><img class="product-photo" src="${p.photo}" alt="${esc(p.name)} fotoğrafı" loading="lazy"><span class="photo-zoom-hint" aria-hidden="true">⤢</span></button>` : '<div class="photo-placeholder">Fotoğraf<br>yok</div>'}<label class="photo-upload">Fotoğraf seç<input type="file" accept="image/*" data-photo-id="${esc(p.id)}" aria-label="${esc(p.name)} fotoğrafı yükle"></label></div></td>
+      <td class="photo-cell"><div class="product-photo-wrap">${p.photo ? `<button class="product-photo-btn" type="button" data-product-detail="${esc(p.id)}" aria-label="${esc(p.name)} detayını aç" title="Ürün detayını aç"><img class="product-photo" src="${p.photo}" alt="${esc(p.name)} fotoğrafı" loading="lazy"><span class="photo-zoom-hint" aria-hidden="true">⤢</span></button>` : '<div class="photo-placeholder">Fotoğraf<br>yok</div>'}<label class="photo-upload">Fotoğraf seç<input type="file" accept="image/*" data-photo-id="${esc(p.id)}" aria-label="${esc(p.name)} fotoğrafı yükle"></label></div></td>
       <td><input class="name-input" aria-label="Ürün adı" data-pid="${esc(p.id)}" data-k="name" value="${esc(p.name)}"></td>
       <td><input type="number" min="0" step="1" aria-label="Adet" data-pid="${esc(p.id)}" data-k="qty" value="${Number(p.qty)||0}"></td>
       <td><input type="number" min="0" step="0.1" aria-label="Toplam gram" data-pid="${esc(p.id)}" data-k="grams" value="${Number(p.grams)||0}"></td>
       <td><input type="number" min="0" step="0.1" aria-label="Baskı süresi saat" data-pid="${esc(p.id)}" data-k="hours" value="${Number(p.hours)||0}" placeholder="Saat"></td>
-      <td>${fmt(c.gram)} g</td><td>${money(c.filament)}</td><td title="(Baskı süresi ÷ adet) × yazıcı gücü (kW) × kWh fiyatı">${money(c.electric)}</td><td>${money(c.stand)}</td><td title="(Baskı süresi ÷ adet) × (yazıcı bedeli ÷ ömür)">${money(c.machine)}</td><td title="(Baskı süresi ÷ adet) × saatlik bakım fonu (nozzle, PTFE, PEI, dişli, fan)">${money(c.wear)}</td><td title="Fire oranı: %${fmt(x.wasteRate,1)}">${money(c.fire)}</td><td>${money(c.lighter)}</td><td class="money">${money(c.unit)}</td>
+      <td>${fmt(c.gram)} g</td><td>${colorCell}</td><td>${money(c.filament)}</td><td title="(Baskı süresi ÷ adet) × yazıcı gücü (kW) × kWh fiyatı">${money(c.electric)}</td><td>${money(c.stand)}</td><td title="(Baskı süresi ÷ adet) × (yazıcı bedeli ÷ ömür)">${money(c.machine)}</td><td title="(Baskı süresi ÷ adet) × saatlik bakım fonu (nozzle, PTFE, PEI, dişli, fan)">${money(c.wear)}</td><td title="Fire oranı: %${fmt(x.wasteRate,1)}">${money(c.fire)}</td><td>${money(c.lighter)}</td><td class="money">${money(c.unit)}</td>
       <td><input class="sale-input" type="number" min="0" step="0.01" aria-label="Satış fiyatı" data-pid="${esc(p.id)}" data-k="sale" value="${Number(p.sale)||0}"></td>
       <td class="${c.profit>=0?'profit-positive':'profit-negative'}">${money(c.profit)}</td>
-      <td class="stock-cell ${stockClass}" title="${producible} adet üretilebilir; plan ${fmt(Number(p.qty)||0,0)} adet">${producible} adet</td>
       <td class="money">${money(c.total)}</td>
-      <td><button class="delete-btn" data-delete="${esc(p.id)}" title="Ürünü sil" aria-label="Ürünü sil">×</button></td>`;
+      <td><div class="row-actions"><button class="detail-btn" data-product-detail="${esc(p.id)}" type="button" title="Ürün detayını aç">Detay</button><button class="delete-btn" data-delete="${esc(p.id)}" title="Ürünü sil" aria-label="Ürünü sil">×</button></div></td>`;
     rows.appendChild(tr);
   });
   const all = state.products.map(p=>({p,c:calc(p,x)}));
@@ -367,6 +471,7 @@ function renderProducts() {
   }).join('');
   renderSaleProductOptions();
   renderInventory();
+  if ($('productDetailModal') && !$('productDetailModal').hidden) renderProductDetail();
 }
 function renderSaleProductOptions() {
   const select = $('saleProduct');
@@ -397,29 +502,71 @@ function renderInventory() {
   $('stockBottleneckNote').textContent = bottleneck
     ? (bottleneck.shortfall > 0 ? `${fmt(bottleneck.shortfall,0)} adet eksik` : `${fmt(bottleneck.producible,0)} adet basılabilir`)
     : 'Stok sınırı';
-  $('stockTag').textContent = stock.stockKg >= stock.neededKg && stock.stockKg > 0 ? 'Stok yeterli' : 'Stok uyarısı';
+  const hasShortage = stock.colorRows.some(row => row.remaining < -0.0005) || stock.items.some(item => item.shortfall > 0);
+  $('stockTag').textContent = stock.stockKg > 0 && !hasShortage ? 'Stok yeterli' : 'Stok uyarısı';
+
+  // --- Renk bazlı stok tablosu ---
+  if ($('colorStockTag')) $('colorStockTag').textContent = `${stock.colorRows.length} renk`;
+  const colorRowsEl = $('colorStockRows');
+  if (colorRowsEl) {
+    colorRowsEl.innerHTML = stock.colorRows.map(row=>{
+      const short = row.remaining < -0.0005;
+      const low = row.stockKg > 0 && stock.minStockKg > 0 && row.stockKg < stock.minStockKg;
+      const status = row.stockKg <= 0
+        ? '<span class="status-pill neutral">Stok yok</span>'
+        : short
+          ? `<span class="status-pill danger">${fmt(-row.remaining,2)} kg eksik</span>`
+          : low
+            ? '<span class="status-pill warn">Kritik</span>'
+            : '<span class="status-pill ok">Yeterli</span>';
+      return `<tr>
+        <td><span class="color-name"><i class="color-dot" style="background:${colorSwatch(row.name)}"></i>${esc(row.name)}</span></td>
+        <td><div class="input-wrap mini-input"><input type="number" min="0" step="0.1" data-color-stock="${esc(row.name)}" value="${Number(row.stockKg.toFixed(3))}" aria-label="${esc(row.name)} stoğu kg"><b>kg</b></div></td>
+        <td>${fmt(row.neededKg,2)} kg</td>
+        <td class="${short?'is-bad':'is-good'}">${fmt(row.remaining,2)} kg</td>
+        <td>${status}</td>
+        <td><button class="delete-btn" type="button" data-color-remove="${esc(row.name)}" title="Bu rengi stoktan kaldır" aria-label="${esc(row.name)} rengini stoktan kaldır">×</button></td>
+      </tr>`;
+    }).join('');
+  }
+  if ($('colorStockEmpty')) $('colorStockEmpty').style.display = stock.colorRows.length ? 'none' : 'block';
+  const colorList = $('stockColorList');
+  if (colorList) colorList.innerHTML = stock.colorRows.map(row=>`<option value="${esc(row.name)}"></option>`).join('');
 
   // --- Uyarı listesi ---
   const alerts = [];
-  if (stock.stockKg <= 0) alerts.push(['danger','Depoda filament görünmüyor. Envanter sayfasından stok girişi yap.']);
-  else if (stock.minStockKg > 0 && stock.stockKg < stock.minStockKg) alerts.push(['danger',`Kritik stok: ${fmt(stock.stockKg,2)} kg, belirlediğin ${fmt(stock.minStockKg,2)} kg eşiğinin altında.`]);
-  if (stock.stockKg > 0 && stock.neededKg > stock.stockKg) alerts.push(['danger',`Planı tamamlamak için ${fmt(stock.neededKg-stock.stockKg,2)} kg filament eksik.`]);
+  if (stock.stockKg <= 0) alerts.push(['danger','Depoda filament görünmüyor. Aşağıdaki stok girişinden renk ve miktar ekle.']);
+  else if (stock.minStockKg > 0 && stock.stockKg < stock.minStockKg) alerts.push(['danger',`Kritik stok: toplam ${fmt(stock.stockKg,2)} kg, belirlediğin ${fmt(stock.minStockKg,2)} kg eşiğinin altında.`]);
+  if (stock.stockKg > 0 && stock.neededKg > stock.stockKg) alerts.push(['danger',`Planı tamamlamak için toplam ${fmt(stock.neededKg-stock.stockKg,2)} kg filament eksik.`]);
+  stock.colorRows.filter(row=>row.stockKg<=0 && row.neededKg>0).forEach(row=>{
+    alerts.push(['warn',`"${row.name}" rengi için stok yok; plan ${fmt(row.neededKg,2)} kg gerektiriyor.`]);
+  });
+  stock.colorRows.filter(row=>row.stockKg>0 && row.remaining<-0.0005).forEach(row=>{
+    alerts.push(['danger',`"${row.name}" rengi plana ${fmt(-row.remaining,2)} kg yetmiyor.`]);
+  });
   stock.items.filter(item=>item.shortfall>0 && item.gpu>0).forEach(item=>{
-    alerts.push(['warn',`"${item.p.name || 'İsimsiz ürün'}" için stok ${fmt(item.producible,0)} adede yetiyor; plan ${fmt(item.qty,0)} adet. Yaklaşık ${fmt((item.shortfall*item.effGpu)/1000,2)} kg daha gerekiyor.`]);
+    const reason = item.colored ? 'renk stoğu' : 'stok';
+    alerts.push(['warn',`"${item.p.name || 'İsimsiz ürün'}" için ${reason} ${fmt(item.producible,0)} adede yetiyor; plan ${fmt(item.qty,0)} adet.`]);
   });
   if (!alerts.length) alerts.push(['ok','Stok, mevcut üretim planını karşılamaya yeterli görünüyor.']);
   $('stockAlerts').innerHTML = alerts.map(([type,text])=>`<div class="alert-item ${type}"><span class="alert-dot"></span><p>${esc(text)}</p></div>`).join('');
 
-  // --- Stok tablosu ---
-  $('stockRows').innerHTML = stock.items.map(item=>`<tr>
-    <td>${esc(item.p.name || 'İsimsiz ürün')}</td>
-    <td>${fmt(item.gpu)} g</td>
-    <td>${fmt(item.effGpu)} g</td>
-    <td>${fmt(item.qty,0)}</td>
-    <td class="${item.shortfall>0?'stock-short':'stock-ok'}">${fmt(item.producible,0)} adet</td>
-    <td>${fmt(item.plannedKg,2)} kg</td>
-    <td>${item.gpu<=0 ? '<span class="status-pill neutral">Gram girilmedi</span>' : item.shortfall>0 ? `<span class="status-pill danger">${fmt(item.shortfall,0)} adet eksik</span>` : '<span class="status-pill ok">Yeterli</span>'}</td>
-  </tr>`).join('');
+  // --- Ürünlere göre stok tablosu ---
+  $('stockRows').innerHTML = stock.items.map(item=>{
+    const chips = item.colored
+      ? `<div class="color-chip-list">${item.colorUse.map(color=>`<span class="color-chip"><i style="background:${colorSwatch(color.name)}"></i>${esc(color.name)} <small>${fmt(color.gramsPerUnit,1)} g</small></span>`).join('')}</div>`
+      : '<span class="muted-chip">Genel stok</span>';
+    return `<tr>
+      <td>${esc(item.p.name || 'İsimsiz ürün')}</td>
+      <td>${chips}</td>
+      <td>${fmt(item.gpu)} g</td>
+      <td>${fmt(item.effGpu)} g</td>
+      <td>${fmt(item.qty,0)}</td>
+      <td class="${item.shortfall>0?'stock-short':'stock-ok'}">${fmt(item.producible,0)} adet</td>
+      <td>${fmt(item.plannedKg,2)} kg</td>
+      <td>${!item.colored ? '<span class="status-pill neutral">Renk tanımlanmadı</span>' : item.gpu<=0 ? '<span class="status-pill neutral">Gram girilmedi</span>' : item.shortfall>0 ? `<span class="status-pill danger">${fmt(item.shortfall,0)} adet eksik</span>` : '<span class="status-pill ok">Yeterli</span>'}</td>
+    </tr>`;
+  }).join('');
   $('stockEmpty').style.display = stock.items.length ? 'none' : 'block';
 
   // --- Enflasyon özeti ---
@@ -466,15 +613,17 @@ function renderInventory() {
 function saveStockEntry(event) {
   event.preventDefault();
   if (!cloudReady) { toast('Bulut bağlantısı kurulmadan stok kaydedilemez.'); return; }
+  const color = sanitizeColorName($('stockAddColor').value);
+  if (!color) { toast('Eklemek için bir renk adı gir.'); return; }
   const kg = Math.max(0, num('stockAddKg'));
   const price = Math.max(0, num('stockAddPrice'));
   const dateValue = $('stockAddDate').value || todayISO();
   if (!kg) { toast('Eklemek için en az 0,01 kg girmelisin.'); return; }
   const previous = params().filamentPrice;
-  const newStock = Math.round(((Number(state.filamentStockKg)||0)+kg)*1000)/1000;
+  const newStock = Math.round(((Number(filamentStock[color])||0)+kg)*1000)/1000;
   const priceChanged = price > 0 && Math.abs(price-previous) > 0.001;
   const updates = {};
-  updates['params/filamentStockKg'] = newStock;
+  updates[`filamentStock/${color}`] = newStock;
   if (priceChanged) updates['params/filamentPrice'] = price;
   let historyEntry = null;
   if (priceChanged) {
@@ -483,14 +632,14 @@ function saveStockEntry(event) {
     historyEntry = {
       id:historyKey, date:Number.isNaN(stamp.getTime())?new Date().toISOString():stamp.toISOString(),
       key:'filamentPrice', label:'Filament fiyatı (TL/kg)', oldValue:previous, newValue:price,
-      source:'Alım kaydı', note:`${fmt(kg,2)} kg filament alımı`
+      source:'Alım kaydı', note:`${fmt(kg,2)} kg ${color} filament alımı`
     };
     updates[`costHistory/${historyKey}`] = historyEntry;
   }
   rootRef.update(updates)
     .then(() => {
-      state.filamentStockKg = newStock;
-      $('filamentStockKg').value = newStock;
+      filamentStock[color] = newStock;
+      $('stockAddColor').value = color;
       if (priceChanged) {
         state.filamentPrice = price;
         $('filamentPrice').value = price;
@@ -501,8 +650,8 @@ function saveStockEntry(event) {
       $('stockAddDate').value = todayISO();
       renderProducts(); renderSales(); renderInventory();
       toast(priceChanged
-        ? `Stoğa ${fmt(kg,2)} kg eklendi. Yeni fiyat ${money(price)} / kg buluta işlendi.`
-        : `Stoğa ${fmt(kg,2)} kg filament eklendi.`);
+        ? `${color} stoğuna ${fmt(kg,2)} kg eklendi. Yeni fiyat ${money(price)} / kg buluta işlendi.`
+        : `${color} stoğuna ${fmt(kg,2)} kg filament eklendi.`);
     })
     .catch(error => cloudError(error, 'stok girişi'));
 }
@@ -550,8 +699,10 @@ function renderSales() {
   const profit = records.reduce((sum,s)=>sum+(Number(s.profit)||0),0);
   $('salesUnits').textContent = fmt(qty,0); $('salesRevenue').textContent = money(revenue);
   $('salesCost').textContent = money(cost); $('salesProfit').textContent = money(profit);
-  $('statProfit').textContent = money(profit);
-  $('statProfitCaption').textContent = $('salesPeriod').selectedOptions[0]?.textContent || 'Seçili satış dönemine göre';
+  // Ana sayfadaki kâr kartı, dönem filtresinden bağımsız olarak gerçek satış kayıtlarından gelir.
+  const allProfit = sales.reduce((sum, s) => sum + (Number(s.profit) || 0), 0);
+  $('statProfit').textContent = money(allProfit);
+  $('statProfitCaption').textContent = sales.length ? `Yapılan ${sales.length} satış kaydından` : 'Henüz satış kaydı yok';
   $('salesEmpty').style.display = records.length ? 'none' : 'block';
   $('salesRows').innerHTML = records.map(s=>`<tr>
     <td>${esc(s.date)}</td><td>${esc(s.productName)}</td><td>${fmt(s.qty,0)}</td><td>${money(s.unitPrice)}</td><td class="money">${money(s.revenue)}</td><td>${money(s.unitCost)}</td><td>${money(s.totalCost)}</td><td class="${s.profit>=0?'profit-positive':'profit-negative'}">${money(s.profit)}</td><td>${esc(s.note||'')}</td><td><button class="detail-btn" data-sale-detail="${esc(s.id)}" type="button">Fiyat detayı</button></td><td><button class="delete-btn" data-sale-delete="${esc(s.id)}" title="Satış kaydını sil" aria-label="Satış kaydını sil">×</button></td>
@@ -562,7 +713,7 @@ function snapshotForSale(product, x) {
   const c = calc(product, x);
   return {
     params: clone(x),
-    product: { id: product.id, name: product.name || 'İsimsiz ürün', qty: Number(product.qty)||0, grams: Number(product.grams)||0, hours: Number(product.hours)||0, usesLighter: Boolean(product.usesLighter), photo: product.photo || '' },
+    product: { id: product.id, name: product.name || 'İsimsiz ürün', qty: Number(product.qty)||0, grams: Number(product.grams)||0, hours: Number(product.hours)||0, usesLighter: Boolean(product.usesLighter), photo: product.photo || '', colors: productColors(product) },
     breakdown: { filament:c.filament, electric:c.electric, stand:c.stand, machine:c.machine, wear:c.wear, fire:c.fire, lighter:c.lighter, unit:c.unit },
     capturedAt: new Date().toISOString()
   };
@@ -678,59 +829,106 @@ stockInputIds.forEach(id=>{
   el.addEventListener('input',()=>{ state[id]=num(id); renderProducts(); queueParamWrite(id, state[id]); });
   el.addEventListener('change',()=>{ state[id]=num(id); queueParamWrite(id, state[id]); renderInventory(); });
 });
+function processPhotoFile(file, id) {
+  if (!cloudReady) { toast('Bulut bağlantısı kurulmadan fotoğraf yüklenemez.'); return; }
+  const product = productById(id);
+  if (!file || !product) return;
+  if (!file.type.startsWith('image/')) { toast('Lütfen bir fotoğraf dosyası seç.'); return; }
+  if (file.size > 12*1024*1024) { toast('Fotoğraf en fazla 12 MB olabilir.'); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const maxSide = 640;
+      const scale = Math.min(1,maxSide/Math.max(img.width,img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1,Math.round(img.width*scale));
+      canvas.height = Math.max(1,Math.round(img.height*scale));
+      canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+      // PNG olarak kaydet: alfa kanalı korunur, şeffaf alanlar siyaha dönüşmez.
+      const dataUrl = canvas.toDataURL('image/png');
+      if (dataUrl.length > 1800000) { toast('Fotoğraf bulut kaydı için çok büyük. Daha küçük bir görsel seç.'); return; }
+      product.photo = dataUrl;
+      writeProductItem(id, {photo:dataUrl});
+      renderProducts();
+      toast('Ürün fotoğrafı Firebase’e kaydedildi.');
+    };
+    img.onerror = () => toast('Fotoğraf okunamadı.');
+    img.src = reader.result;
+  };
+  reader.onerror = () => toast('Fotoğraf yüklenemedi.');
+  reader.readAsDataURL(file);
+}
+
 $('productRows').addEventListener('change',event=>{
   const fileInput = event.target.closest('input[data-photo-id]');
   if (fileInput) {
-    if (!cloudReady) { toast('Bulut bağlantısı kurulmadan fotoğraf yüklenemez.'); return; }
     const file = fileInput.files && fileInput.files[0];
-    const id = fileInput.dataset.photoId;
-    const product = productById(id);
-    if (!file || !product) return;
-    if (!file.type.startsWith('image/')) { toast('Lütfen bir fotoğraf dosyası seç.'); return; }
-    if (file.size > 12*1024*1024) { toast('Fotoğraf en fazla 12 MB olabilir.'); return; }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const maxSide = 480;
-        const scale = Math.min(1,maxSide/Math.max(img.width,img.height));
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1,Math.round(img.width*scale));
-        canvas.height = Math.max(1,Math.round(img.height*scale));
-        canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
-        // PNG olarak kaydet: alfa kanalı korunur, şeffaf alanlar siyaha dönüşmez.
-        const dataUrl = canvas.toDataURL('image/png');
-        if (dataUrl.length > 1500000) { toast('Fotoğraf bulut kaydı için çok büyük. Daha küçük bir görsel seç.'); return; }
-        product.photo = dataUrl;
-        writeProductItem(id, {photo:dataUrl});
-        renderProducts();
-        toast('Ürün fotoğrafı Firebase’e kaydedildi.');
-      };
-      img.onerror = () => toast('Fotoğraf okunamadı.');
-      img.src = reader.result;
-    };
-    reader.onerror = () => toast('Fotoğraf yüklenemedi.');
-    reader.readAsDataURL(file);
+    if (file) processPhotoFile(file, fileInput.dataset.photoId);
     return;
   }
   const el=event.target; if (!el.dataset.pid || !el.dataset.k) return;
   const product=productById(el.dataset.pid); if(!product)return;
-  const key=el.dataset.k; product[key]=key==='name'?el.value:Math.max(0,Number(el.value)||0);
-  writeProductItem(product.id,{[key]:product[key]});
+  const key=el.dataset.k;
+  if (key === 'name') {
+    product.name = el.value;
+    writeProductItem(product.id, {name: product.name});
+  } else if (key === 'qty') {
+    const qty = Math.max(0, Number(el.value) || 0);
+    product.qty = qty;
+    const fields = {qty};
+    const raw = rawColors(product);
+    if (raw.length) {
+      const unit = raw.reduce((sum, color) => sum + Math.max(0, Number(color?.grams) || 0), 0);
+      product.grams = Math.round(unit * qty * 100) / 100;
+      fields.grams = product.grams;
+    }
+    writeProductItem(product.id, fields);
+  } else if (key === 'grams') {
+    const grams = Math.max(0, Number(el.value) || 0);
+    product.grams = grams;
+    const fields = {grams};
+    const qty = Math.max(0, Number(product.qty) || 0);
+    const raw = rawColors(product).map(color => ({
+      name: String(color?.name ?? ''),
+      grams: Math.max(0, Number(color?.grams) || 0)
+    }));
+    if (raw.length && qty > 0) {
+      // Toplam gram elle değiştirildiğinde renk gramları oransal olarak ölçeklenir.
+      const targetUnit = grams / qty;
+      const sum = raw.reduce((total, color) => total + color.grams, 0);
+      product.colors = raw.map(color => ({
+        name: color.name,
+        grams: Math.round((sum > 0 ? color.grams * targetUnit / sum : targetUnit / raw.length) * 100) / 100
+      }));
+      fields.colors = product.colors;
+    }
+    writeProductItem(product.id, fields);
+  } else {
+    product[key] = Math.max(0, Number(el.value) || 0);
+    writeProductItem(product.id, {[key]: product[key]});
+  }
   renderProducts(); renderSales();
 });
 $('productRows').addEventListener('click',event=>{
-  const photoButton=event.target.closest('[data-photo-open]');
-  if(photoButton){openLightbox(photoButton.dataset.photoOpen,photoButton);return;}
-  const button=event.target.closest('[data-delete]'); if(!button)return;
-  const product=productById(button.dataset.delete); if(!product)return;
-  if (!cloudReady) { toast('Bulut bağlantısı kurulmadan ürün silinemez.'); return; }
-  if(confirm(`"${product.name||'Ürün'}" ürününü silmek istiyor musun? Satış geçmişindeki kayıtlar korunur.`)){
-    state.products = state.products.filter(item=>String(item.id)!==String(product.id));
-    renderProducts(); renderSales();
-    productsRef.child(product.id).remove().catch(error=>cloudError(error,'ürün silme'));
-    toast('Ürün buluttan silindi.');
+  const detailButton=event.target.closest('[data-product-detail]');
+  if(detailButton){openProductDetail(detailButton.dataset.productDetail);return;}
+  const button=event.target.closest('[data-delete]');
+  if (button) {
+    const product=productById(button.dataset.delete); if(!product)return;
+    if (!cloudReady) { toast('Bulut bağlantısı kurulmadan ürün silinemez.'); return; }
+    if(confirm(`"${product.name||'Ürün'}" ürününü silmek istiyor musun? Satış geçmişindeki kayıtlar korunur.`)){
+      state.products = state.products.filter(item=>String(item.id)!==String(product.id));
+      renderProducts(); renderSales();
+      productsRef.child(product.id).remove().catch(error=>cloudError(error,'ürün silme'));
+      toast('Ürün buluttan silindi.');
+    }
+    return;
   }
+  // Düzenlenebilir alanlara tıklanmadıysa satırın tamamı ürün detayını açar.
+  if (event.target.closest('input, select, textarea, label, button, a')) return;
+  const row = event.target.closest('tr[data-product-row]');
+  if (row) openProductDetail(row.dataset.productRow);
 });
 $('salesRows').addEventListener('click',event=>{
   const detailButton=event.target.closest('[data-sale-detail]');
@@ -765,7 +963,12 @@ $('saleProduct').addEventListener('change',()=>{const p=productById($('saleProdu
 $('salesPeriod').addEventListener('change',renderSales);
 $('closeSaleDetail').addEventListener('click',()=>$('saleDetailModal').hidden=true);
 $('saleDetailModal').addEventListener('click',event=>{if(event.target===$('saleDetailModal')) $('saleDetailModal').hidden=true;});
-document.addEventListener('keydown',event=>{if(event.key==='Escape') $('saleDetailModal').hidden=true;});
+document.addEventListener('keydown',event=>{
+  if (event.key !== 'Escape') return;
+  if ($('photoLightbox') && !$('photoLightbox').hidden) return; // önce lightbox kapanır
+  $('saleDetailModal').hidden = true;
+  if ($('productDetailModal') && !$('productDetailModal').hidden) closeProductDetail();
+});
 $('addProduct').addEventListener('click',addProduct); $('addProductTop').addEventListener('click',addProduct);
 $('searchInput').addEventListener('input',renderProducts);
 $('saleDate').value=todayISO();
@@ -774,82 +977,176 @@ if ($('stockAddPrice')) $('stockAddPrice').value=state.filamentPrice ?? defaults
 window.addEventListener('beforeunload',()=>{ if (pendingWriteCount()) flushParamWrites(); });
 
 /* =========================================================
- * ESP32 CİHAZ SAYFASI
+ * ÜRÜN DETAY MODALI
+ * Fotoğrafa, ürün satırına veya "Detay" düğmesine tıklanınca açılır.
+ * Kullanılan renkler, renk başına gram ve büyük fotoğraf gösterilir.
  * ========================================================= */
-function formatUptime(seconds) {
-  const total = Math.max(0, Math.floor(Number(seconds) || 0));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  if (h > 0) return `${h} sa ${m} dk`;
-  if (m > 0) return `${m} dk ${s} sn`;
-  return `${s} sn`;
+function openProductDetail(id) {
+  detailProductId = String(id);
+  const modal = $('productDetailModal');
+  if (!modal) return;
+  modal.hidden = false;
+  renderProductDetail();
 }
-function renderDevice() {
-  if (!$('deviceStatusValue')) return;
-  const status = deviceState.status || {};
-  const telemetry = deviceState.telemetry || {};
-  const control = deviceState.control || {};
-  const lastSeen = Number(status.lastSeen) || Number(telemetry.updatedAt) || 0;
-  const online = lastSeen > 0 && (Date.now() - lastSeen < 90000);
-  $('deviceStatusValue').textContent = online ? 'Çevrimiçi' : (lastSeen ? 'Çevrimdışı' : 'Bekleniyor');
-  $('deviceStatusValue').classList.toggle('is-good', online);
-  $('deviceStatusValue').classList.toggle('is-bad', Boolean(lastSeen) && !online);
-  const tag = $('deviceStatusTag');
-  if (tag) {
-    tag.textContent = online ? 'Cihaz bağlı' : 'Cihaz bekleniyor';
-    tag.classList.toggle('tag-offline', !online);
-  }
-  $('deviceLastSeen').textContent = lastSeen
-    ? `Son görülme: ${new Date(lastSeen).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`
-    : 'Henüz veri yok';
-  $('deviceIp').textContent = status.ip || '—';
-  $('deviceFirmware').textContent = status.firmware || 'ESP32 · firmware bekleniyor';
-  $('deviceRssi').textContent = Number.isFinite(Number(telemetry.rssi)) ? `${fmt(telemetry.rssi,0)}` : '—';
-  $('deviceUptime').textContent = Number.isFinite(Number(telemetry.uptime)) ? formatUptime(telemetry.uptime) : '—';
-  $('deviceTempValue').textContent = Number.isFinite(Number(telemetry.temperature)) ? fmt(telemetry.temperature,1) : '—';
-  $('deviceHumidityValue').textContent = Number.isFinite(Number(telemetry.humidity)) ? fmt(telemetry.humidity,0) : '—';
-  $('deviceFilamentValue').textContent = telemetry.filamentPresent === undefined ? '—' : (telemetry.filamentPresent ? 'Var' : 'Yok');
-  $('deviceFilamentValue').classList.toggle('is-bad', telemetry.filamentPresent === false);
-  $('deviceFilamentValue').classList.toggle('is-good', telemetry.filamentPresent === true);
-  $('deviceTelemetryTime').textContent = Number.isFinite(Number(telemetry.updatedAt))
-    ? new Date(Number(telemetry.updatedAt)).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'})
-    : '—';
-  const relay = Boolean(control.relay);
-  const toggle = $('deviceRelayToggle');
-  toggle.textContent = relay ? 'Açık' : 'Kapalı';
-  toggle.classList.toggle('is-on', relay);
-  toggle.setAttribute('aria-pressed', String(relay));
-  $('deviceRelayHint').textContent = control.updatedAt
-    ? `Son komut: ${new Date(Number(control.updatedAt)).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'})}`
-    : 'Komut gönderilmedi';
-  const tempEl = $('deviceTargetTemp');
-  if (tempEl && document.activeElement !== tempEl) tempEl.value = Number.isFinite(Number(control.targetTemp)) ? Number(control.targetTemp) : 0;
+function closeProductDetail() {
+  const modal = $('productDetailModal');
+  if (modal) modal.hidden = true;
+  detailProductId = null;
 }
-if ($('deviceRelayToggle')) {
-  $('deviceRelayToggle').addEventListener('click',()=>{
-    const next = !Boolean((deviceState.control || {}).relay);
-    writeDeviceControl({relay:next});
-    toast(next ? 'Röle açma komutu buluta yazıldı.' : 'Röle kapatma komutu buluta yazıldı.');
+function detailColorList(product) {
+  return rawColors(product)
+    .map(color => ({name: String(color?.name ?? ''), grams: Math.max(0, Number(color?.grams) || 0)}))
+    .filter(color => color.name || color.grams > 0);
+}
+function saveDetailColors(colors) {
+  const product = productById(detailProductId);
+  if (!product) return;
+  const clean = colors
+    .map(color => ({name: sanitizeColorName(color.name), grams: Math.max(0, Number(color.grams) || 0)}))
+    .filter(color => color.name || color.grams > 0);
+  const qty = Math.max(0, Number(product.qty) || 0);
+  const unit = clean.reduce((sum, color) => sum + color.grams, 0);
+  product.colors = clean;
+  product.grams = Math.round(unit * qty * 100) / 100;
+  writeProductItem(product.id, {colors: clean.length ? clean : null, grams: product.grams});
+  renderProducts(); renderSales();
+}
+function renderProductDetail() {
+  const modal = $('productDetailModal');
+  if (!modal || modal.hidden) return;
+  const product = productById(detailProductId);
+  if (!product) { closeProductDetail(); return; }
+  const x = params();
+  const c = calc(product, x);
+  const qty = Math.max(0, Number(product.qty) || 0);
+  const colors = detailColorList(product);
+  const gramPrice = x.filamentPrice / 1000;
+  const totalUnitGrams = unitGrams(product);
+  $('productDetailTitle').textContent = product.name || 'İsimsiz ürün';
+  $('productDetailSubtitle').textContent = `${fmt(qty,0)} adet · ${fmt(totalUnitGrams,1)} g/adet · toplam ${fmt(totalUnitGrams*qty,1)} g filament`;
+  const colorOptions = [...new Set([
+    ...Object.keys(filamentStock || {}),
+    ...colors.map(color => color.name)
+  ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'tr'));
+  const colorRowsHtml = colors.length ? colors.map((color, index) => {
+    const stockKg = Number(filamentStock[color.name] || 0);
+    return `<div class="color-edit-row">
+      <span class="color-dot" style="background:${colorSwatch(color.name)}"></span>
+      <input class="color-name-input" list="productColorOptions" data-color-index="${index}" data-color-field="name" value="${esc(color.name)}" placeholder="Renk adı" aria-label="Renk adı" maxlength="24">
+      <div class="input-wrap mini-input"><input type="number" min="0" step="0.1" data-color-index="${index}" data-color-field="grams" value="${Number(color.grams)}" aria-label="Adet başına gram"><b>g/adet</b></div>
+      <div class="color-edit-meta">Toplam <strong>${fmt(color.grams*qty,1)} g</strong> · ${money(color.grams*qty*gramPrice)} · Stok: ${stockKg > 0 ? `${fmt(stockKg,2)} kg` : 'yok'}</div>
+      <button class="delete-btn" type="button" data-color-delete="${index}" title="Rengi üründen kaldır" aria-label="Rengi üründen kaldır">×</button>
+    </div>`;
+  }).join('') : '<p class="empty-inline">Bu ürüne henüz renk tanımlanmadı. Aşağıdan renk adı ve gram ekleyebilirsin.</p>';
+  const metaItems = [
+    ['Adet', fmt(qty,0)],
+    ['Baskı süresi', `${fmt(Number(product.hours)||0,1)} sa`],
+    ['Birim maliyet', money(c.unit)],
+    ['Satış fiyatı', money(product.sale)],
+    ['Birim kâr', money(c.profit)],
+    ['Toplam maliyet', money(c.total)]
+  ];
+  $('productDetailInfo').innerHTML = `
+    <div class="detail-grid product-detail-meta">${metaItems.map(([label,value])=>`<div class="detail-item"><span>${esc(label)}</span><strong>${esc(String(value))}</strong></div>`).join('')}</div>
+    <h3 class="detail-section-title">Kullanılan renkler ve filament</h3>
+    <div class="color-edit-list">${colorRowsHtml}</div>
+    <div class="color-add-row">
+      <input id="detailNewColor" list="productColorOptions" placeholder="Renk adı" maxlength="24" autocomplete="off" aria-label="Yeni renk adı">
+      <div class="input-wrap mini-input"><input id="detailNewGrams" type="number" min="0" step="0.1" placeholder="Gram" aria-label="Yeni rengin adet başına gramı"><b>g/adet</b></div>
+      <button class="btn btn-primary" type="button" data-detail-add-color>＋ Renk ekle</button>
+    </div>
+    <datalist id="productColorOptions">${colorOptions.map(name=>`<option value="${esc(name)}"></option>`).join('')}</datalist>
+    <div class="detail-total"><span>Toplam filament<strong>${fmt(totalUnitGrams*qty,1)} g</strong></span><span>Filament maliyeti<strong>${money(c.filament*qty)}</strong></span><span>Renk çeşidi<strong>${fmt(colors.length,0)}</strong></span></div>`;
+  const photoEl = $('productDetailPhoto');
+  photoEl.innerHTML = product.photo
+    ? `<button class="detail-photo-btn" type="button" data-detail-photo-open aria-label="Fotoğrafı büyüt" title="Büyütmek için tıkla"><img src="${product.photo}" alt="${esc(product.name||'Ürün')} fotoğrafı"><span class="detail-photo-hint">Büyüt ⤢</span></button>`
+    : '<div class="detail-photo-empty">Fotoğraf yok</div>';
+  photoEl.innerHTML += '<label class="photo-upload detail-photo-upload">Fotoğraf seç<input type="file" accept="image/*" data-detail-photo-upload aria-label="Ürün fotoğrafı yükle"></label>';
+}
+function removeDetailColor(index) {
+  const product = productById(detailProductId);
+  if (!product) return;
+  const colors = detailColorList(product);
+  colors.splice(index, 1);
+  saveDetailColors(colors);
+}
+function addDetailColor() {
+  const product = productById(detailProductId);
+  if (!product) return;
+  const nameInput = $('detailNewColor');
+  const gramsInput = $('detailNewGrams');
+  const name = sanitizeColorName(nameInput?.value);
+  const grams = Math.max(0, Number(gramsInput?.value) || 0);
+  if (!name && !grams) { toast('Renk adı veya gram gir.'); return; }
+  const colors = detailColorList(product);
+  colors.push({name, grams});
+  if (nameInput) nameInput.value = '';
+  if (gramsInput) gramsInput.value = '';
+  saveDetailColors(colors);
+  toast('Renk ürüne eklendi.');
+}
+function updateDetailColor(index, field, value) {
+  const product = productById(detailProductId);
+  if (!product) return;
+  const colors = detailColorList(product);
+  if (!colors[index]) return;
+  if (field === 'name') colors[index].name = sanitizeColorName(value);
+  else colors[index].grams = Math.max(0, Number(value) || 0);
+  saveDetailColors(colors);
+}
+if ($('productDetailModal')) {
+  $('closeProductDetail').addEventListener('click', closeProductDetail);
+  $('productDetailModal').addEventListener('click', event => {
+    if (event.target === $('productDetailModal')) { closeProductDetail(); return; }
+    const photoButton = event.target.closest('[data-detail-photo-open]');
+    if (photoButton) {
+      const product = productById(detailProductId);
+      if (product?.photo) openLightbox(product.id, photoButton);
+      return;
+    }
+    const addButton = event.target.closest('[data-detail-add-color]');
+    if (addButton) { addDetailColor(); return; }
+    const deleteButton = event.target.closest('[data-color-delete]');
+    if (deleteButton) { removeDetailColor(Number(deleteButton.dataset.colorDelete)); return; }
+  });
+  $('productDetailModal').addEventListener('change', event => {
+    const fileInput = event.target.closest('input[data-detail-photo-upload]');
+    if (fileInput) {
+      const file = fileInput.files && fileInput.files[0];
+      if (file) processPhotoFile(file, detailProductId);
+      return;
+    }
+    const colorInput = event.target.closest('[data-color-index]');
+    if (!colorInput) return;
+    updateDetailColor(Number(colorInput.dataset.colorIndex), colorInput.dataset.colorField, colorInput.value);
   });
 }
-if ($('deviceTargetTemp')) {
-  $('deviceTargetTemp').addEventListener('change',()=>{
-    const value = Math.max(0, Math.min(300, Number($('deviceTargetTemp').value) || 0));
-    $('deviceTargetTemp').value = value;
-    writeDeviceControl({targetTemp:value});
-    toast(`Hedef sıcaklık ${value} °C olarak buluta yazıldı.`);
+
+/* ---------- Renk stoğu tablosu olayları ---------- */
+if ($('colorStockRows')) {
+  $('colorStockRows').addEventListener('change', event => {
+    const input = event.target.closest('input[data-color-stock]');
+    if (!input) return;
+    const color = input.dataset.colorStock;
+    const kg = Math.max(0, Number(input.value) || 0);
+    filamentStock[color] = kg;
+    renderProducts(); renderSales(); renderInventory();
+    writeColorStock(color, kg)
+      .then(()=>toast(`${color} stoğu ${fmt(kg,2)} kg olarak güncellendi.`))
+      .catch(()=>{});
+  });
+  $('colorStockRows').addEventListener('click', event => {
+    const button = event.target.closest('[data-color-remove]');
+    if (!button) return;
+    const color = button.dataset.colorRemove;
+    if (!cloudReady) { toast('Bulut bağlantısı kurulmadan stok silinemez.'); return; }
+    if (!confirm(`"${color}" rengini stoktan kaldırmak istiyor musun?`)) return;
+    delete filamentStock[color];
+    deleteColorStock(color);
+    renderProducts(); renderSales(); renderInventory();
+    toast('Renk stoktan kaldırıldı.');
   });
 }
-if ($('devicePingBtn')) {
-  $('devicePingBtn').addEventListener('click',()=>{
-    if (!cloudReady) { toast('Bulut bağlantısı kurulmadan ping gönderilemez.'); return; }
-    deviceRef.child('command').set({action:'ping', requestedAt:Date.now(), nonce:Math.random().toString(36).slice(2,8)})
-      .then(()=>toast('Ping komutu buluta yazıldı.'))
-      .catch(error=>cloudError(error,'ping komutu'));
-  });
-}
-setInterval(renderDevice, 30000);
 
 /* ---------- Fotoğraf büyütme (lightbox) ---------- */
 const lb = { items:[], index:0, zoom:1, panX:0, panY:0, dragging:false, trigger:null, timer:null };
@@ -1033,7 +1330,6 @@ renderProducts();
 renderSales();
 renderCostHistory();
 renderInventory();
-renderDevice();
 initFirebase();
 const initialPage = location.hash.slice(1);
-showPage(['production','sales','inventory','device','analysis'].includes(initialPage) ? initialPage : 'production');
+showPage(['production','sales','inventory','analysis'].includes(initialPage) ? initialPage : 'production');

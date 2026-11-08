@@ -14,7 +14,6 @@
         <a class="active" href="#production" data-page="production">▤ <span>Ürünler & Maliyetler</span></a>
         <a href="#sales" data-page="sales">₺ <span>Satış Kayıtları</span></a>
         <a href="#inventory" data-page="inventory">▣ <span>Envanter & Stok</span></a>
-        <a href="#device" data-page="device">◎ <span>Cihaz / ESP32</span></a>
         <a href="#analysis" data-page="analysis">◉ <span>Maliyet Analizi</span></a>
       </nav>
       <div class="sidebar-note" id="cloudNote" data-status="connecting"><span class="pulse"></span><span id="cloudStatusText">Bulut bağlantısı kuruluyor…</span><small id="cloudStatusSub">Tüm veriler Google Firebase Realtime Database üzerinde saklanır.</small></div>
@@ -65,7 +64,7 @@
         <div class="section-heading product-heading"><div><p class="eyebrow">02 / ÜRÜNLER</p><h2>Ürün maliyet tablosu</h2><p class="muted">Adet, toplam gram, partinin toplam baskı süresi ve satış fiyatını gir. Süreye bağlı giderler adede bölünerek birim maliyet ve tahmini kâr otomatik hesaplanır.</p></div><button class="btn btn-primary" id="addProduct">＋ Yeni ürün</button></div>
         <div class="table-toolbar"><div class="searchbox">⌕ <input id="searchInput" placeholder="Ürün ara..."></div><span class="muted" id="rowCount">2 ürün</span></div>
         <div class="table-wrap"><table>
-          <thead><tr><th>Fotoğraf</th><th>Ürün adı</th><th>Adet</th><th>Toplam gram</th><th>Baskı süresi (saat)</th><th>Gram / adet</th><th>Filament / adet</th><th>Elektrik / adet</th><th>Stand / adet</th><th>Amortisman / adet</th><th>Aşınma / adet</th><th>Fire payı / adet</th><th>Çakmak / adet</th><th>Birim maliyet</th><th>Satış fiyatı</th><th>Birim kâr</th><th>Stokla basılabilir</th><th>Toplam maliyet</th><th></th></tr></thead>
+          <thead><tr><th>Fotoğraf</th><th>Ürün adı</th><th>Adet</th><th>Toplam gram</th><th>Baskı süresi (saat)</th><th>Gram / adet</th><th>Renkler</th><th>Filament / adet</th><th>Elektrik / adet</th><th>Stand / adet</th><th>Amortisman / adet</th><th>Aşınma / adet</th><th>Fire payı / adet</th><th>Çakmak / adet</th><th>Birim maliyet</th><th>Satış fiyatı</th><th>Birim kâr</th><th>Toplam maliyet</th><th></th></tr></thead>
           <tbody id="productRows"></tbody>
         </table></div>
         <div class="table-footer"><span>Ürünler Firebase Realtime Database'de canlı olarak saklanır ve tüm cihazlara anlık yansır.</span><strong id="totalFooter">Toplam maliyet: ₺0,00</strong></div>
@@ -106,12 +105,11 @@
       <section class="page-section inventory-page" id="inventory">
         <section class="panel">
           <div class="section-heading">
-            <div><p class="eyebrow">04 / ENVANTER</p><h2>Filament stok ve üretim kapasitesi</h2><p class="muted">Depodaki filament miktarına göre her üründen kaç adet basabileceğini gösterir. Fire oranı hesaba katılır.</p></div>
+            <div><p class="eyebrow">04 / ENVANTER</p><h2>Renk bazlı filament stok ve üretim kapasitesi</h2><p class="muted">Her rengin deposunda ne kadar kaldığını ayrı görürsün. Ürünlerde tanımlı renk gramlarına göre her üründen kaç adet basılabileceği fire dahil hesaplanır.</p></div>
             <span class="tag" id="stockTag">Stok takibi</span>
           </div>
           <div class="inputs-grid inventory-inputs">
-            <label class="field"><span>Depodaki filament <small>kg</small></span><div class="input-wrap"><input id="filamentStockKg" type="number" min="0" step="0.1" value="0"><b>kg</b></div></label>
-            <label class="field"><span>Kritik stok uyarı eşiği <small>kg</small></span><div class="input-wrap"><input id="minStockKg" type="number" min="0" step="0.1" value="2"><b>kg</b></div></label>
+            <label class="field"><span>Renk başına kritik stok eşiği <small>kg</small></span><div class="input-wrap"><input id="minStockKg" type="number" min="0" step="0.1" value="2"><b>kg</b></div></label>
           </div>
           <div class="stock-cards">
             <article><span>Mevcut stok</span><strong id="stockCurrent">0 kg</strong><small>Hammadde</small></article>
@@ -119,21 +117,35 @@
             <article><span>Plan sonrası kalan</span><strong id="stockRemaining">0 kg</strong><small>Bakiye</small></article>
             <article><span>Darboğaz ürün</span><strong id="stockBottleneck">—</strong><small id="stockBottleneckNote">Stok sınırı</small></article>
           </div>
+          <div class="color-stock-head">
+            <div><h3>Renk bazlı stok</h3><p class="muted">Her rengin stokta kalan miktarı. Kilogram alanını düzenleyerek güncelleyebilir, çöp kutusuyla rengi kaldırabilirsin.</p></div>
+            <span class="tag" id="colorStockTag">0 renk</span>
+          </div>
+          <div class="table-wrap"><table class="stock-table color-stock-table">
+            <thead><tr><th>Renk</th><th>Stokta</th><th>Plan için gerekli</th><th>Kalan</th><th>Durum</th><th></th></tr></thead>
+            <tbody id="colorStockRows"></tbody>
+          </table></div>
+          <div id="colorStockEmpty" class="empty-state">Henüz renk stoğu yok. Aşağıdaki alım formundan renk adı ve miktar girerek ilk stoğu ekle.</div>
+          <div class="color-stock-head">
+            <div><h3>Ürünlere göre üretim kapasitesi</h3><p class="muted">Planlanan adetler için gereken renk miktarları ve stokla basılabilecek adet.</p></div>
+          </div>
           <div id="stockAlerts" class="alert-list"></div>
           <div class="table-wrap"><table class="stock-table">
-            <thead><tr><th>Ürün</th><th>Gram / adet</th><th>Fire dahil gram</th><th>Plan adet</th><th>Stokla basılabilir</th><th>Plan için filament</th><th>Durum</th></tr></thead>
+            <thead><tr><th>Ürün</th><th>Renk dağılımı</th><th>Gram / adet</th><th>Fire dahil gram</th><th>Plan adet</th><th>Stokla basılabilir</th><th>Plan için filament</th><th>Durum</th></tr></thead>
             <tbody id="stockRows"></tbody>
           </table></div>
           <div id="stockEmpty" class="empty-state">Henüz ürün yok. Ürünler sayfasından ürün ekleyebilirsin.</div>
           <div class="stock-buy">
             <h3>Stok girişi / filament alımı</h3>
-            <p class="muted">Aldığın filament miktarını ve fiyatını gir. Fiyat güncel fiyattan farklıysa enflasyon takipçisine otomatik kaydedilir.</p>
-            <form id="stockForm" class="sales-form">
+            <p class="muted">Rengi, miktarı ve fiyatı gir. Aynı renk tekrar girilirse mevcut stoğun üzerine eklenir. Fiyat güncel fiyattan farklıysa enflasyon takipçisine otomatik kaydedilir.</p>
+            <form id="stockForm" class="sales-form stock-entry-form">
+              <label class="field"><span>Renk</span><input id="stockAddColor" type="text" list="stockColorList" maxlength="24" placeholder="Örn. Siyah" autocomplete="off" required></label>
               <label class="field"><span>Alınan miktar (kg)</span><input id="stockAddKg" type="number" min="0.01" step="0.1" value="1" required></label>
               <label class="field"><span>Alım fiyatı (TL / kg)</span><input id="stockAddPrice" type="number" min="0" step="0.01" value="700" required></label>
               <label class="field"><span>Alım tarihi</span><input id="stockAddDate" type="date" required></label>
               <button class="btn btn-primary" type="submit">＋ Stoğa ekle</button>
             </form>
+            <datalist id="stockColorList"></datalist>
           </div>
         </section>
 
@@ -157,59 +169,28 @@
         </section>
       </section>
 
-      <section class="page-section device-page" id="device">
-        <section class="panel">
-          <div class="section-heading">
-            <div><p class="eyebrow">06 / BAĞLI CİHAZ</p><h2>ESP32 canlı bağlantısı</h2><p class="muted">Cihaz internete bağlı olduğu sürece telemetriyi buluttan canlı okur, röle ve hedef sıcaklık komutlarını anında alır. Hangi ağda olduğun önemli değil.</p></div>
-            <span class="tag" id="deviceStatusTag">Cihaz bekleniyor</span>
-          </div>
-          <div class="stock-cards device-cards">
-            <article><span>Cihaz durumu</span><strong id="deviceStatusValue">—</strong><small id="deviceLastSeen">Henüz veri yok</small></article>
-            <article><span>IP adresi</span><strong id="deviceIp">—</strong><small id="deviceFirmware">ESP32</small></article>
-            <article><span>Wi-Fi sinyali</span><strong id="deviceRssi">—</strong><small>dBm</small></article>
-            <article><span>Çalışma süresi</span><strong id="deviceUptime">—</strong><small>Son açılıştan beri</small></article>
-          </div>
-          <div class="device-grid">
-            <div class="device-card">
-              <h3>Uzaktan kontrol</h3>
-              <p class="muted">Komutlar <code>printcost/device/control</code> düğümüne yazılır; ESP32 döngüsü bunları okuyup uygular.</p>
-              <div class="device-control-row">
-                <div><span class="device-label">Röle / dijital çıkış</span><small id="deviceRelayHint">Komut gönderilmedi</small></div>
-                <button class="device-toggle" id="deviceRelayToggle" type="button" aria-pressed="false">Kapalı</button>
-              </div>
-              <div class="device-control-row">
-                <div><span class="device-label">Hedef sıcaklık</span><small>°C · ESP32 bu değeri kendi kontrol mantığında kullanır</small></div>
-                <div class="input-wrap device-temp-input"><input id="deviceTargetTemp" type="number" min="0" max="300" step="1" value="0"><b>°C</b></div>
-              </div>
-              <div class="device-control-row">
-                <div><span class="device-label">Bağlantı testi</span><small>Cihazın komut kuyruğuna ping gönderir</small></div>
-                <button class="btn btn-light" id="devicePingBtn" type="button">↻ Ping gönder</button>
-              </div>
-            </div>
-            <div class="device-card">
-              <h3>Canlı telemetri</h3>
-              <p class="muted">ESP32'nin buluta yazdığı son ölçümler. Sayfa açıkken saniyeler içinde güncellenir.</p>
-              <div class="telemetry-grid">
-                <article><span>Sıcaklık</span><strong id="deviceTempValue">—</strong><small>°C</small></article>
-                <article><span>Nem</span><strong id="deviceHumidityValue">—</strong><small>%</small></article>
-                <article><span>Filament sensörü</span><strong id="deviceFilamentValue">—</strong><small>optik sensör</small></article>
-                <article><span>Son ölçüm</span><strong id="deviceTelemetryTime">—</strong><small>bulut kaydı</small></article>
-              </div>
-              <p class="note">Telemetri düğümü: <code>printcost/device/telemetry</code> · Kontrol düğümü: <code>printcost/device/control</code> · Komut: <code>printcost/device/command</code></p>
-            </div>
-          </div>
-        </section>
-      </section>
-
       <section class="page-section analysis-page" id="analysis">
-        <div class="section-heading"><div><p class="eyebrow">06 / DETAYLI ANALİZ</p><h2>Maliyet analizi</h2><p class="muted">Maliyet dağılımı ve hesaplama açıklamaları bu ayrı bölümde yer alır.</p></div><span class="tag">Canlı analiz</span></div>
+        <div class="section-heading"><div><p class="eyebrow">05 / DETAYLI ANALİZ</p><h2>Maliyet analizi</h2><p class="muted">Maliyet dağılımı ve hesaplama açıklamaları bu ayrı bölümde yer alır.</p></div><span class="tag">Canlı analiz</span></div>
         <div class="analysis-grid">
           <article class="panel chart-panel"><div class="section-heading"><div><p class="eyebrow">GİDERLER</p><h2>Maliyet dağılımı</h2></div></div><div class="cost-visual"><div id="costDonut" class="cost-donut"><div class="donut-center"><strong id="costGrandTotal">₺0,00</strong><span>Toplam maliyet</span></div></div><div id="costBreakdown" class="breakdown"></div></div></article>
-          <article class="panel tips-panel"><div class="section-heading"><div><p class="eyebrow">BİLGİ</p><h2>Hesaplama notları</h2></div><span class="stat-icon green">✓</span></div><ul><li>Filament maliyeti, ürünün gram/adet değeri üzerinden hesaplanır.</li><li>Elektrik maliyeti adet başına <strong>(baskı süresi ÷ adet) × (yazıcı gücü ÷ 1000) × kWh fiyatı</strong> olarak hesaplanır; toplam sürenin adede düşen payı esas alınır.</li><li>Amortisman adet başına <strong>(baskı süresi ÷ adet) × (yazıcı bedeli ÷ beklenen ömür)</strong>, aşınma ise <strong>(baskı süresi ÷ adet) × bakım fonu</strong> formülüyle hesaplanır. Bakım fonu nozzle, PTFE, PEI, ekstruder dişlisi ve fan giderlerini kapsar. Baskı süresi girilmeyen ürünlerde bu üç kalem sıfırdır.</li><li>Fire payı, başarısız baskılar için filament, stand ve enerji maliyetinin üzerine <strong>(1 + fire oranı)</strong> çarpanıyla eklenir.</li><li>Stand maliyeti, stand filamentinin toplam maliyetinin ilgili ürün adedine bölünmesiyle hesaplanır.</li><li>Çakmak maliyeti, hedef üretim adedine bölünerek tüm ürünlere uygulanır.</li><li>Envanter sayfası, depodaki filamentle kaç adet ürün basılabileceğini fire dahil hesaplar; stok girişleri ve fiyat değişimleri enflasyon takipçisine işlenir.</li><li>Satış kaydında ciro, maliyet ve kâr saklanır; haftalık ve aylık özetler seçilen döneme göre güncellenir.</li></ul><p class="note">Tüm ürünler, satışlar, maliyet parametreleri ve fiyat geçmişi Google Firebase Realtime Database'de saklanır. Başka bir cihazdan veya mobil veriyle girdiğinde aynı veriler onValue dinleyicisiyle anlık olarak yüklenir; tarayıcı hafızası kullanılmaz.</p></article>
+          <article class="panel tips-panel"><div class="section-heading"><div><p class="eyebrow">BİLGİ</p><h2>Hesaplama notları</h2></div><span class="stat-icon green">✓</span></div><ul><li>Filament maliyeti, üründe tanımlı renklerin gram/adet toplamı üzerinden hesaplanır. Renk tanımlanmamış ürünlerde toplam gram ÷ adet değeri kullanılır.</li><li>Elektrik maliyeti adet başına <strong>(baskı süresi ÷ adet) × (yazıcı gücü ÷ 1000) × kWh fiyatı</strong> olarak hesaplanır; toplam sürenin adede düşen payı esas alınır.</li><li>Amortisman adet başına <strong>(baskı süresi ÷ adet) × (yazıcı bedeli ÷ beklenen ömür)</strong>, aşınma ise <strong>(baskı süresi ÷ adet) × bakım fonu</strong> formülüyle hesaplanır. Bakım fonu nozzle, PTFE, PEI, ekstruder dişlisi ve fan giderlerini kapsar. Baskı süresi girilmeyen ürünlerde bu üç kalem sıfırdır.</li><li>Fire payı, başarısız baskılar için filament, stand ve enerji maliyetinin üzerine <strong>(1 + fire oranı)</strong> çarpanıyla eklenir.</li><li>Stand maliyeti, stand filamentinin toplam maliyetinin ilgili ürün adedine bölünmesiyle hesaplanır.</li><li>Çakmak maliyeti, hedef üretim adedine bölünerek tüm ürünlere uygulanır.</li><li>Envanter sayfası, her rengin deposunda kalan miktarı ayrı gösterir. Ürünlerin renk gramlarına göre stokla kaç adet basılabileceği fire dahil hesaplanır; stok girişleri ve fiyat değişimleri enflasyon takipçisine işlenir.</li>
+<li>Bir ürünün fotoğrafına veya satırına tıklandığında ürün detayı açılır; o üründe kullanılan renkler, her renkten kaç gram kullanıldığı ve büyük ürün fotoğrafı görüntülenir.</li><li>Satış kaydında ciro, maliyet ve kâr saklanır; haftalık ve aylık özetler seçilen döneme göre güncellenir.</li></ul><p class="note">Tüm ürünler, satışlar, maliyet parametreleri ve fiyat geçmişi Google Firebase Realtime Database'de saklanır. Başka bir cihazdan veya mobil veriyle girdiğinde aynı veriler onValue dinleyicisiyle anlık olarak yüklenir; tarayıcı hafızası kullanılmaz.</p></article>
         </div>
       </section>
       <footer>PrintCost · 3D baskı maliyet hesaplayıcı <span>Veriler Firebase bulutunda saklanır</span></footer>
     </main>
+  </div>
+  <div class="modal-backdrop" id="productDetailModal" hidden>
+    <section class="detail-modal product-detail-modal" role="dialog" aria-modal="true" aria-labelledby="productDetailTitle">
+      <div class="detail-modal-head">
+        <div><p class="eyebrow">ÜRÜN DETAYI</p><h2 id="productDetailTitle">Ürün</h2><p id="productDetailSubtitle" class="muted"></p></div>
+        <button class="modal-close" id="closeProductDetail" type="button" aria-label="Kapat">×</button>
+      </div>
+      <div class="product-detail-grid">
+        <div class="product-detail-info" id="productDetailInfo"></div>
+        <div class="product-detail-photo" id="productDetailPhoto"></div>
+      </div>
+    </section>
   </div>
   <div class="modal-backdrop" id="saleDetailModal" hidden>
     <section class="detail-modal" role="dialog" aria-modal="true" aria-labelledby="saleDetailTitle">
