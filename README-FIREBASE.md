@@ -95,3 +95,22 @@ konsolunda **Realtime Database → Import JSON** ile içe aktarabilirsin; ancak 
 `products` ve `sales` düğümleri altında nesne (push ID) yapısında olmalıdır.
 
 `Excel_Sablon_Ornek.xlsx` dosyası artık hiçbir kod tarafından kullanılmıyor; istersen silebilirsin.
+
+## 5. Giriş (login), tema ve kenar çubuğu
+
+- **Giriş:** Uygulama açılışta giriş ekranı gösterir. Hesaplar `printcost/auth/users/{eposta}`
+  altında `{ email, passHash, createdAt }` olarak tutulur; `passHash`, e-posta ile tuzlanmış
+  SHA-256 özetidir (şifre düz metin saklanmaz). Veritabanında hesap yoksa, kurulum hesabı
+  (`uretken3d@gmail.com`) ilk doğru girişte otomatik oluşturulur. Veri dinleyicileri
+  yalnızca giriş doğrulandıktan sonra bağlanır. Oturum tarayıcıda `pc_session` anahtarında
+  tutulur ve her açılışta veritabanıyla yeniden doğrulanır; sağ üstteki çıkış düğmesi siler.
+  Yeni kullanıcı eklemek için Firebase konsolunda aynı yapıda bir düğüm oluştur
+  (`passHash` = `SHA-256("printcost::" + eposta + "::" + şifre)`, eposta küçük harf).
+- **Tema:** Sağ üstteki palet düğmesi Koyu / Açık / Gece mavisi seçeneklerini açar.
+  Seçim `pc_theme` anahtarında saklanır ve `<html data-theme>` ile uygulanır.
+- **Kenar çubuğu:** Sol üstteki düğme paneli açar/kapatır; durum `pc_sidebar` anahtarında saklanır.
+
+> **Güvenlik notu:** İstemci tarafı doğrulama, kuralların herkese açık olduğu (test modu)
+> bir veritabanında gerçek koruma sağlamaz; veritabanı adresini bilen biri doğrudan okuyabilir.
+> Gerçek erişim denetimi için Firebase Authentication'a geçip yukarıdaki kuralları
+> `auth != null` olarak uygula.

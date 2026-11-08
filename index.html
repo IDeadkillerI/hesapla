@@ -3,26 +3,77 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#09090b">
   <title>3D Baskı Maliyet Merkezi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Sora:wght@500;600;700&display=swap" rel="stylesheet">
+  <script>
+    (function(){try{
+      var t=localStorage.getItem('pc_theme');
+      if(['dark','light','midnight'].indexOf(t)<0)t='dark';
+      document.documentElement.setAttribute('data-theme',t);
+      var m=document.querySelector('meta[name="theme-color"]');
+      if(m)m.setAttribute('content',{dark:'#09090b',light:'#f4f5f7',midnight:'#050b1a'}[t]);
+      if(localStorage.getItem('pc_sidebar')==='collapsed')document.documentElement.setAttribute('data-sb','collapsed');
+    }catch(e){document.documentElement.setAttribute('data-theme','dark')}})();
+  </script>
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="auth-locked">
   <div class="app-shell">
-    <aside class="sidebar">
-      <div class="brand"><div class="brand-icon">3D</div><div><strong>PrintCost</strong><span>Maliyet Merkezi</span></div></div>
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 20.5 7.5v9L12 21l-8.5-4.5v-9L12 3Z"/><path d="M12 12 20.5 7.5M12 12 3.5 7.5M12 12v9"/></svg>
+        </div>
+        <div><strong>PrintCost</strong><span>Maliyet Merkezi</span></div>
+      </div>
       <nav>
-        <a class="active" href="#production" data-page="production">▤ <span>Ürünler & Maliyetler</span></a>
-        <a href="#sales" data-page="sales">₺ <span>Satış Kayıtları</span></a>
-        <a href="#inventory" data-page="inventory">▣ <span>Envanter & Stok</span></a>
-        <a href="#analysis" data-page="analysis">◉ <span>Maliyet Analizi</span></a>
+        <a class="active" href="#production" data-page="production">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg>
+          <span>Ürünler &amp; Maliyetler</span>
+        </a>
+        <a href="#sales" data-page="sales">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9.5 8h5M9.5 11.5h5"/></svg>
+          <span>Satış Kayıtları</span>
+        </a>
+        <a href="#inventory" data-page="inventory">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 8 4.5-8 4.5-8-4.5L12 3Z"/><path d="m4 11.5 8 4.5 8-4.5"/><path d="m4 16.5 8 4.5 8-4.5"/></svg>
+          <span>Envanter &amp; Stok</span>
+        </a>
+        <a href="#analysis" data-page="analysis">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 13.5A8.5 8.5 0 1 1 10.5 3v10.5h10Z"/><path d="M14 3.5A8.5 8.5 0 0 1 20.5 10H14V3.5Z"/></svg>
+          <span>Maliyet Analizi</span>
+        </a>
       </nav>
       <div class="sidebar-note" id="cloudNote" data-status="connecting"><span class="pulse"></span><span id="cloudStatusText">Bulut bağlantısı kuruluyor…</span><small id="cloudStatusSub">Tüm veriler Google Firebase Realtime Database üzerinde saklanır.</small></div>
     </aside>
 
     <main class="main">
+      <div class="utilbar">
+        <button class="icon-btn" id="sidebarToggle" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="Kenar çubuğunu gizle" title="Kenar çubuğunu aç / kapat">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/></svg>
+        </button>
+        <div class="utilbar-right">
+          <span class="user-chip" id="userChip" hidden><i class="dot"></i><span id="userEmail"></span></span>
+          <button class="icon-btn" id="themeToggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="themeMenu" aria-label="Tema seç" title="Tema">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.4 0 2-.9 2-1.8 0-1.3-1-1.6-1-2.7 0-1 .8-1.7 1.9-1.7h2.2a3 3 0 0 0 3-3C20 7 16.5 3.5 12 3.5Z"/><circle cx="7.8" cy="11.2" r="1" fill="currentColor"/><circle cx="10.6" cy="7.6" r="1" fill="currentColor"/><circle cx="15" cy="8" r="1" fill="currentColor"/></svg>
+          </button>
+          <button class="icon-btn" id="logoutBtn" type="button" aria-label="Çıkış yap" title="Çıkış yap" hidden>
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 20.5h-4a1.5 1.5 0 0 1-1.5-1.5V5a1.5 1.5 0 0 1 1.5-1.5h4"/><path d="M16 16.5 20.5 12 16 7.5M20.5 12H9.5"/></svg>
+          </button>
+          <div class="theme-menu" id="themeMenu" role="radiogroup" aria-label="Tema" hidden>
+            <p class="theme-menu-title">GÖRÜNÜM</p>
+            <button class="theme-option" type="button" role="radio" data-theme-choice="dark" aria-checked="false"><span class="theme-swatch" data-t="dark"></span><span><b>Koyu</b><small>Matte Workshop · varsayılan</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
+            <button class="theme-option" type="button" role="radio" data-theme-choice="light" aria-checked="false"><span class="theme-swatch" data-t="light"></span><span><b>Açık</b><small>Ferah beyaz ve gri tonlar</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
+            <button class="theme-option" type="button" role="radio" data-theme-choice="midnight" aria-checked="false"><span class="theme-swatch" data-t="midnight"></span><span><b>Gece mavisi</b><small>Yüksek kontrast · camgöbeği vurgu</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
+          </div>
+        </div>
+      </div>
       <header class="topbar">
         <div><p class="eyebrow">ÜRETİM • MALİYET • KÂR</p><h1>3D Baskı Maliyet Merkezi</h1><p class="subtitle">Üretim giderlerini hesapla, satışlarını kaydet ve haftalık/aylık kârını takip et.</p></div>
-        <div class="top-actions"><button class="btn btn-primary" id="addProductTop">＋ Ürün ekle</button></div>
+        <div class="top-actions"><button class="btn btn-primary" id="addProductTop"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Ürün ekle</button></div>
       </header>
 
       <div class="cloud-banner" id="cloudBanner" hidden>
@@ -31,10 +82,26 @@
       </div>
 
       <section id="dashboard" class="stats-grid">
-        <article class="stat-card"><div class="stat-top"><span>Ürün çeşidi</span><span class="stat-icon purple">▦</span></div><strong id="statProducts">2</strong><small>Kayıtlı ürün</small></article>
-        <article class="stat-card"><div class="stat-top"><span>Toplam üretim</span><span class="stat-icon blue">▤</span></div><strong id="statUnits">45</strong><small>Ürün tablosundaki adet</small></article>
-        <article class="stat-card"><div class="stat-top"><span>Toplam üretim maliyeti</span><span class="stat-icon orange">₺</span></div><strong id="statCost">₺0,00</strong><small>Kayıtlı ürünlerin tahmini maliyeti</small></article>
-        <article class="stat-card"><div class="stat-top"><span>Satışlardan net kâr</span><span class="stat-icon green">↗</span></div><strong id="statProfit">₺0,00</strong><small id="statProfitCaption">Seçili satış dönemine göre</small></article>
+        <article class="stat-card">
+          <div class="stat-top"><span>Ürün çeşidi</span><span class="stat-icon purple"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg></span></div>
+          <strong id="statProducts">2</strong>
+          <small>Kayıtlı ürün</small>
+        </article>
+        <article class="stat-card">
+          <div class="stat-top"><span>Toplam üretim</span><span class="stat-icon blue"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 8 4.5-8 4.5-8-4.5L12 3Z"/><path d="m4 11.5 8 4.5 8-4.5"/><path d="m4 16.5 8 4.5 8-4.5"/></svg></span></div>
+          <strong id="statUnits">45</strong>
+          <small>Ürün tablosundaki adet</small>
+        </article>
+        <article class="stat-card">
+          <div class="stat-top"><span>Toplam üretim maliyeti</span><span class="stat-icon orange"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7.5h17v9h-17z"/><path d="M12 9.5v5M9.8 11h4.4M9.8 13h4.4"/></svg></span></div>
+          <strong id="statCost">₺0,00</strong>
+          <small>Kayıtlı ürünlerin tahmini maliyeti</small>
+        </article>
+        <article class="stat-card">
+          <div class="stat-top"><span>Satışlardan net kâr</span><span class="stat-icon green"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 17 6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg></span></div>
+          <strong id="statProfit">₺0,00</strong>
+          <small id="statProfitCaption">Seçili satış dönemine göre</small>
+        </article>
       </section>
 
       <section class="page-section production-page" id="production">
@@ -54,15 +121,15 @@
           <label class="field"><span>Elektrik birim fiyatı <small>TL / kWh</small></span><div class="input-wrap"><input id="energyPrice" type="number" min="0" step="0.01" value="2.6"><b>₺</b></div></label>
           <label class="field"><span>Yazıcı / donanım bedeli <small>TL</small></span><div class="input-wrap"><input id="printerPrice" type="number" min="0" step="1" value="18000"><b>₺</b></div></label>
           <label class="field"><span>Beklenen çalışma ömrü <small>saat</small></span><div class="input-wrap"><input id="printerLifeHours" type="number" min="1" step="100" value="5000"><b>sa</b></div></label>
-          <label class="field"><span>Bakım & yedek parça fonu <small>nozzle, PTFE, PEI, fan · TL / saat</small></span><div class="input-wrap"><input id="wearCost" type="number" min="0" step="0.01" value="1.5"><b>₺</b></div></label>
+          <label class="field"><span>Bakım &amp; yedek parça fonu <small>nozzle, PTFE, PEI, fan · TL / saat</small></span><div class="input-wrap"><input id="wearCost" type="number" min="0" step="0.01" value="1.5"><b>₺</b></div></label>
         </div>
         <div class="formula-strip"><span>Filament gram fiyatı <strong id="gramPrice">₺0,70 / g</strong></span><span>Standın toplam filament maliyeti <strong id="standTotal">₺147,00</strong></span><span>Çakmak başına maliyet <strong id="lighterUnit">₺8,33</strong></span><span>Fire çarpanı <strong id="wasteFactor">×1,08</strong></span><span>Saatlik enerji <strong id="hourlyEnergy">₺0,31 / saat</strong></span><span>Saatlik amortisman <strong id="hourlyDep">₺3,60 / saat</strong></span><span>Saatlik aşınma <strong id="hourlyWear">₺1,50 / saat</strong></span></div>
         <p class="note input-note">Süreye bağlı giderler adet başına hesaplanır: <strong>(baskı süresi ÷ adet) × saatlik birim maliyet</strong>. Elektrikte saatlik maliyet <strong>yazıcı gücü (kW) × kWh fiyatı</strong>, amortismanda <strong>yazıcı bedeli ÷ beklenen ömür</strong>, aşınmada <strong>bakım fonu (TL/saat)</strong> kullanılır. Baskı süresi girilmeyen ürünlerde bu kalemler sıfır sayılır.</p>
       </section>
 
       <section class="panel" id="products">
-        <div class="section-heading product-heading"><div><p class="eyebrow">02 / ÜRÜNLER</p><h2>Ürün maliyet tablosu</h2><p class="muted">Adet, toplam gram, partinin toplam baskı süresi ve satış fiyatını gir. Süreye bağlı giderler adede bölünerek birim maliyet ve tahmini kâr otomatik hesaplanır.</p></div><button class="btn btn-primary" id="addProduct">＋ Yeni ürün</button></div>
-        <div class="table-toolbar"><div class="searchbox">⌕ <input id="searchInput" placeholder="Ürün ara..."></div><span class="muted" id="rowCount">2 ürün</span></div>
+        <div class="section-heading product-heading"><div><p class="eyebrow">02 / ÜRÜNLER</p><h2>Ürün maliyet tablosu</h2><p class="muted">Adet, toplam gram, partinin toplam baskı süresi ve satış fiyatını gir. Süreye bağlı giderler adede bölünerek birim maliyet ve tahmini kâr otomatik hesaplanır.</p></div><button class="btn btn-primary" id="addProduct"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Yeni ürün</button></div>
+        <div class="table-toolbar"><div class="searchbox"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg><input id="searchInput" placeholder="Ürün ara..."></div><span class="muted" id="rowCount">2 ürün</span></div>
         <div class="table-wrap"><table>
           <thead><tr><th>Fotoğraf</th><th>Ürün adı</th><th>Adet</th><th>Toplam gram</th><th>Baskı süresi (saat)</th><th>Gram / adet</th><th>Renkler</th><th>Filament / adet</th><th>Elektrik / adet</th><th>Stand / adet</th><th>Amortisman / adet</th><th>Aşınma / adet</th><th>Fire payı / adet</th><th>Çakmak / adet</th><th>Birim maliyet</th><th>Satış fiyatı</th><th>Birim kâr</th><th>Toplam maliyet</th><th></th></tr></thead>
           <tbody id="productRows"></tbody>
@@ -80,7 +147,7 @@
           <label class="field"><span>Birim satış fiyatı (TL)</span><input id="salePrice" type="number" min="0" step="0.01" value="0" required></label>
           <label class="field"><span>Satış tarihi</span><input id="saleDate" type="date" required></label>
           <label class="field sale-note-field"><span>Not (isteğe bağlı)</span><input id="saleNote" type="text" maxlength="120" placeholder="Örn. Instagram siparişi"></label>
-          <button class="btn btn-primary sale-submit" type="submit">＋ Satışı kaydet</button>
+          <button class="btn btn-primary sale-submit" type="submit"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Satışı kaydet</button>
         </form>
         <div class="sales-stats">
           <article><span>Satış adedi</span><strong id="salesUnits">0</strong></article>
@@ -143,7 +210,7 @@
               <label class="field"><span>Alınan miktar (kg)</span><input id="stockAddKg" type="number" min="0.01" step="0.1" value="1" required></label>
               <label class="field"><span>Alım fiyatı (TL / kg)</span><input id="stockAddPrice" type="number" min="0" step="0.01" value="700" required></label>
               <label class="field"><span>Alım tarihi</span><input id="stockAddDate" type="date" required></label>
-              <button class="btn btn-primary" type="submit">＋ Stoğa ekle</button>
+              <button class="btn btn-primary" type="submit"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Stoğa ekle</button>
             </form>
             <datalist id="stockColorList"></datalist>
           </div>
@@ -173,7 +240,7 @@
         <div class="section-heading"><div><p class="eyebrow">05 / DETAYLI ANALİZ</p><h2>Maliyet analizi</h2><p class="muted">Maliyet dağılımı ve hesaplama açıklamaları bu ayrı bölümde yer alır.</p></div><span class="tag">Canlı analiz</span></div>
         <div class="analysis-grid">
           <article class="panel chart-panel"><div class="section-heading"><div><p class="eyebrow">GİDERLER</p><h2>Maliyet dağılımı</h2></div></div><div class="cost-visual"><div id="costDonut" class="cost-donut"><div class="donut-center"><strong id="costGrandTotal">₺0,00</strong><span>Toplam maliyet</span></div></div><div id="costBreakdown" class="breakdown"></div></div></article>
-          <article class="panel tips-panel"><div class="section-heading"><div><p class="eyebrow">BİLGİ</p><h2>Hesaplama notları</h2></div><span class="stat-icon green">✓</span></div><ul><li>Filament maliyeti, üründe tanımlı renklerin gram/adet toplamı üzerinden hesaplanır. Renk tanımlanmamış ürünlerde toplam gram ÷ adet değeri kullanılır.</li><li>Elektrik maliyeti adet başına <strong>(baskı süresi ÷ adet) × (yazıcı gücü ÷ 1000) × kWh fiyatı</strong> olarak hesaplanır; toplam sürenin adede düşen payı esas alınır.</li><li>Amortisman adet başına <strong>(baskı süresi ÷ adet) × (yazıcı bedeli ÷ beklenen ömür)</strong>, aşınma ise <strong>(baskı süresi ÷ adet) × bakım fonu</strong> formülüyle hesaplanır. Bakım fonu nozzle, PTFE, PEI, ekstruder dişlisi ve fan giderlerini kapsar. Baskı süresi girilmeyen ürünlerde bu üç kalem sıfırdır.</li><li>Fire payı, başarısız baskılar için filament, stand ve enerji maliyetinin üzerine <strong>(1 + fire oranı)</strong> çarpanıyla eklenir.</li><li>Stand maliyeti, stand filamentinin toplam maliyetinin ilgili ürün adedine bölünmesiyle hesaplanır.</li><li>Çakmak maliyeti, hedef üretim adedine bölünerek tüm ürünlere uygulanır.</li><li>Envanter sayfası, her rengin deposunda kalan miktarı ayrı gösterir. Ürünlerin renk gramlarına göre stokla kaç adet basılabileceği fire dahil hesaplanır; stok girişleri ve fiyat değişimleri enflasyon takipçisine işlenir.</li>
+          <article class="panel tips-panel"><div class="section-heading"><div><p class="eyebrow">BİLGİ</p><h2>Hesaplama notları</h2></div><span class="stat-icon green"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span></div><ul><li>Filament maliyeti, üründe tanımlı renklerin gram/adet toplamı üzerinden hesaplanır. Renk tanımlanmamış ürünlerde toplam gram ÷ adet değeri kullanılır.</li><li>Elektrik maliyeti adet başına <strong>(baskı süresi ÷ adet) × (yazıcı gücü ÷ 1000) × kWh fiyatı</strong> olarak hesaplanır; toplam sürenin adede düşen payı esas alınır.</li><li>Amortisman adet başına <strong>(baskı süresi ÷ adet) × (yazıcı bedeli ÷ beklenen ömür)</strong>, aşınma ise <strong>(baskı süresi ÷ adet) × bakım fonu</strong> formülüyle hesaplanır. Bakım fonu nozzle, PTFE, PEI, ekstruder dişlisi ve fan giderlerini kapsar. Baskı süresi girilmeyen ürünlerde bu üç kalem sıfırdır.</li><li>Fire payı, başarısız baskılar için filament, stand ve enerji maliyetinin üzerine <strong>(1 + fire oranı)</strong> çarpanıyla eklenir.</li><li>Stand maliyeti, stand filamentinin toplam maliyetinin ilgili ürün adedine bölünmesiyle hesaplanır.</li><li>Çakmak maliyeti, hedef üretim adedine bölünerek tüm ürünlere uygulanır.</li><li>Envanter sayfası, her rengin deposunda kalan miktarı ayrı gösterir. Ürünlerin renk gramlarına göre stokla kaç adet basılabileceği fire dahil hesaplanır; stok girişleri ve fiyat değişimleri enflasyon takipçisine işlenir.</li>
 <li>Bir ürünün fotoğrafına veya satırına tıklandığında ürün detayı açılır; o üründe kullanılan renkler, her renkten kaç gram kullanıldığı ve büyük ürün fotoğrafı görüntülenir.</li><li>Satış kaydında ciro, maliyet ve kâr saklanır; haftalık ve aylık özetler seçilen döneme göre güncellenir.</li></ul><p class="note">Tüm ürünler, satışlar, maliyet parametreleri ve fiyat geçmişi Google Firebase Realtime Database'de saklanır. Başka bir cihazdan veya mobil veriyle girdiğinde aynı veriler onValue dinleyicisiyle anlık olarak yüklenir; tarayıcı hafızası kullanılmaz.</p></article>
         </div>
       </section>
@@ -218,6 +285,30 @@
       </div>
       <button class="lightbox-nav next" id="lightboxNext" type="button" aria-label="Sonraki fotoğraf" title="Sonraki (→)">›</button>
       <div class="lightbox-thumbs" id="lightboxThumbs"></div>
+    </div>
+  </div>
+  <div class="login-overlay" id="loginOverlay" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+    <div class="login-card">
+      <div class="brand">
+        <div class="brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 20.5 7.5v9L12 21l-8.5-4.5v-9L12 3Z"/><path d="M12 12 20.5 7.5M12 12 3.5 7.5M12 12v9"/></svg></div>
+        <div><strong>PrintCost</strong><span>Maliyet Merkezi</span></div>
+      </div>
+      <h2 id="loginTitle">Oturum aç</h2>
+      <p class="muted">Devam etmek için hesabının e-posta ve şifresini gir.</p>
+      <form class="login-form" id="loginForm" novalidate>
+        <label class="field"><span>E-posta</span><input id="loginEmail" type="email" autocomplete="username" inputmode="email" placeholder="ornek@mail.com" required></label>
+        <label class="field"><span>Şifre</span>
+          <div class="pass-wrap">
+            <input id="loginPassword" type="password" autocomplete="current-password" placeholder="••••••••" required>
+            <button class="pass-toggle" id="passToggle" type="button" aria-label="Şifreyi göster" title="Şifreyi göster">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.8"/></svg>
+            </button>
+          </div>
+        </label>
+        <div class="login-error" id="loginError" role="alert" hidden></div>
+        <button class="btn btn-primary login-submit" id="loginSubmit" type="submit">Giriş yap</button>
+      </form>
+      <p class="login-foot" id="loginFoot">Hesap bilgileri Firebase Realtime Database üzerinden doğrulanır.</p>
     </div>
   </div>
   <div class="toast" id="toast" role="status"></div>
