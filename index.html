@@ -46,6 +46,14 @@
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 13.5A8.5 8.5 0 1 1 10.5 3v10.5h10Z"/><path d="M14 3.5A8.5 8.5 0 0 1 20.5 10H14V3.5Z"/></svg>
           <span>Maliyet Analizi</span>
         </a>
+        <a href="#maintenance" data-page="maintenance">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 6.5a3.5 3.5 0 0 0-4.8 4.3L4 16.5V20h3.5l5.7-5.7a3.5 3.5 0 0 0 4.3-4.8l-2.2 2.2-2.5-2.5 2.2-2.2Z"/></svg>
+          <span>Bakım &amp; Gider</span>
+        </a>
+        <a href="#settings" data-page="settings">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21h-4v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3v-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3h4v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.12.6.64 1 1.26 1H21v4h-.09c-.62 0-1.14.4-1.51 1Z"/></svg>
+          <span>Ayarlar &amp; Veri</span>
+        </a>
       </nav>
       <div class="sidebar-note" id="cloudNote" data-status="connecting"><span class="pulse"></span><span id="cloudStatusText">Bulut bağlantısı kuruluyor…</span><small id="cloudStatusSub">Tüm veriler Google Firebase Realtime Database üzerinde saklanır.</small></div>
     </aside>
@@ -119,19 +127,19 @@
         <div class="section-heading"><div><p class="eyebrow">01 / GİRDİLER</p><h2>Maliyet parametreleri</h2><p class="muted">Değerleri değiştirdiğinde ürün maliyetleri otomatik hesaplanır.</p></div><span class="tag">Canlı hesaplama</span></div>
         <p class="input-group-title">Temel parametreler</p>
         <div class="inputs-grid">
-          <label class="field"><span>1 kg filament fiyatı <small>TL / kg</small></span><div class="input-wrap"><input id="filamentPrice" type="number" min="0" step="0.01" value="700"><b>₺</b></div></label>
-          <label class="field"><span>Stand gramı <small>g</small></span><div class="input-wrap"><input id="standGrams" type="number" min="0" step="0.1" value="210"><b>g</b></div></label>
-          <label class="field"><span>Çakmak paket / toplu maliyeti <small>TL</small></span><div class="input-wrap"><input id="lighterCost" type="number" min="0" step="0.01" value="400"><b>₺</b></div></label>
-          <label class="field"><span>Hedef üretim / çakmak adedi <small>adet</small></span><div class="input-wrap"><input id="targetUnits" type="number" min="1" step="1" value="48"><b>adet</b></div></label>
+          <label class="field"><span>1 kg filament fiyatı <small>TL / kg</small></span><div class="input-wrap"><input id="filamentPrice" type="number" min="0.01" max="1000000" step="0.01" value="700"><b>₺</b></div></label>
+          <label class="field"><span>Stand gramı <small>g</small></span><div class="input-wrap"><input id="standGrams" type="number" min="0" max="100000" step="0.1" value="210"><b>g</b></div></label>
+          <label class="field"><span>Çakmak paket / toplu maliyeti <small>TL</small></span><div class="input-wrap"><input id="lighterCost" type="number" min="0" max="1000000" step="0.01" value="400"><b>₺</b></div></label>
+          <label class="field"><span>Hedef üretim / çakmak adedi <small>adet</small></span><div class="input-wrap"><input id="targetUnits" type="number" min="1" max="100000" step="1" value="48"><b>adet</b></div></label>
         </div>
         <p class="input-group-title">Enerji, amortisman, aşınma ve fire</p>
         <div class="inputs-grid">
           <label class="field"><span>Fire / başarısız baskı oranı <small>%</small></span><div class="input-wrap"><input id="wasteRate" type="number" min="0" max="90" step="0.5" value="8"><b>%</b></div></label>
-          <label class="field"><span>Yazıcı ortalama gücü <small>Watt</small></span><div class="input-wrap"><input id="printerPower" type="number" min="0" step="1" value="120"><b>W</b></div></label>
-          <label class="field"><span>Elektrik birim fiyatı <small>TL / kWh</small></span><div class="input-wrap"><input id="energyPrice" type="number" min="0" step="0.01" value="2.6"><b>₺</b></div></label>
-          <label class="field"><span>Yazıcı / donanım bedeli <small>TL</small></span><div class="input-wrap"><input id="printerPrice" type="number" min="0" step="1" value="18000"><b>₺</b></div></label>
-          <label class="field"><span>Beklenen çalışma ömrü <small>saat</small></span><div class="input-wrap"><input id="printerLifeHours" type="number" min="1" step="100" value="5000"><b>sa</b></div></label>
-          <label class="field"><span>Bakım &amp; yedek parça fonu <small>nozzle, PTFE, PEI, fan · TL / saat</small></span><div class="input-wrap"><input id="wearCost" type="number" min="0" step="0.01" value="1.5"><b>₺</b></div></label>
+          <label class="field"><span>Yazıcı ortalama gücü <small>Watt</small></span><div class="input-wrap"><input id="printerPower" type="number" min="0.01" max="100000" step="1" value="120"><b>W</b></div></label>
+          <label class="field"><span>Elektrik birim fiyatı <small>TL / kWh</small></span><div class="input-wrap"><input id="energyPrice" type="number" min="0.01" max="10000" step="0.01" value="2.6"><b>₺</b></div></label>
+          <label class="field"><span>Yazıcı / donanım bedeli <small>TL</small></span><div class="input-wrap"><input id="printerPrice" type="number" min="0" max="100000000" step="1" value="18000"><b>₺</b></div></label>
+          <label class="field"><span>Beklenen çalışma ömrü <small>saat</small></span><div class="input-wrap"><input id="printerLifeHours" type="number" min="1" max="1000000" step="1" value="5000"><b>sa</b></div></label>
+          <label class="field"><span>Bakım &amp; yedek parça fonu <small>nozzle, PTFE, PEI, fan · TL / saat</small></span><div class="input-wrap"><input id="wearCost" type="number" min="0" max="10000" step="0.01" value="1.5"><b>₺</b></div></label>
         </div>
         <div class="formula-strip"><span>Filament gram fiyatı <strong id="gramPrice">₺0,70 / g</strong></span><span>Standın toplam filament maliyeti <strong id="standTotal">₺147,00</strong></span><span>Çakmak başına maliyet <strong id="lighterUnit">₺8,33</strong></span><span>Fire çarpanı <strong id="wasteFactor">×1,08</strong></span><span>Saatlik enerji <strong id="hourlyEnergy">₺0,31 / saat</strong></span><span>Saatlik amortisman <strong id="hourlyDep">₺3,60 / saat</strong></span><span>Saatlik aşınma <strong id="hourlyWear">₺1,50 / saat</strong></span></div>
         <p class="note input-note">Süreye bağlı giderler adet başına hesaplanır: <strong>(baskı süresi ÷ adet) × saatlik birim maliyet</strong>. Elektrikte saatlik maliyet <strong>yazıcı gücü (kW) × kWh fiyatı</strong>, amortismanda <strong>yazıcı bedeli ÷ beklenen ömür</strong>, aşınmada <strong>bakım fonu (TL/saat)</strong> kullanılır. Baskı süresi girilmeyen ürünlerde bu kalemler sıfır sayılır.</p>
@@ -157,16 +165,16 @@
         </div>
         <form id="saleForm" class="sales-form">
           <label class="field"><span>Satılan ürün</span><select id="saleProduct" required></select></label>
-          <label class="field"><span>Adet</span><input id="saleQty" type="number" min="1" step="1" value="1" required></label>
-          <label class="field"><span>Birim satış fiyatı (TL)</span><input id="salePrice" type="number" min="0" step="0.01" value="0" required></label>
+          <label class="field"><span>Adet</span><input id="saleQty" type="number" min="1" max="100000" step="1" value="1" required></label>
+          <label class="field"><span>Birim satış fiyatı (TL)</span><input id="salePrice" type="number" min="0" max="10000000" step="0.01" value="0" required></label>
           <label class="field"><span>Satış tarihi</span><input id="saleDate" type="date" required></label>
           <label class="field sale-note-field"><span>Not (isteğe bağlı)</span><input id="saleNote" type="text" maxlength="120" placeholder="Örn. Instagram siparişi"></label>
           <button class="btn btn-primary sale-submit" type="submit"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Satışı kaydet</button>
         </form>
         <form id="packageForm" class="sales-form package-form" hidden novalidate>
           <label class="field"><span>Paket adı (isteğe bağlı)</span><input id="pkgName" type="text" maxlength="60" placeholder="Örn. Başlangıç seti"></label>
-          <label class="field"><span>Paket adedi</span><input id="pkgQty" type="number" min="1" step="1" value="1"></label>
-          <label class="field"><span>Paket satış fiyatı (TL / paket)</span><input id="pkgPrice" type="number" min="0" step="0.01" value="0"></label>
+          <label class="field"><span>Paket adedi</span><input id="pkgQty" type="number" min="1" max="100000" step="1" value="1"></label>
+          <label class="field"><span>Paket satış fiyatı (TL / paket)</span><input id="pkgPrice" type="number" min="0" max="10000000" step="0.01" value="0"></label>
           <label class="field"><span>Satış tarihi</span><input id="pkgDate" type="date"></label>
           <label class="field sale-note-field"><span>Not (isteğe bağlı)</span><input id="pkgNote" type="text" maxlength="120" placeholder="Örn. Hediye paketi siparişi"></label>
           <div class="pkg-items">
@@ -230,7 +238,7 @@
             <span class="tag" id="stockTag">Stok takibi</span>
           </div>
           <div class="inputs-grid inventory-inputs">
-            <label class="field"><span>Renk başına kritik stok eşiği <small>kg</small></span><div class="input-wrap"><input id="minStockKg" type="number" min="0" step="0.1" value="2"><b>kg</b></div></label>
+            <label class="field"><span>Renk başına kritik stok eşiği <small>kg</small></span><div class="input-wrap"><input id="minStockKg" type="number" min="0" max="1000000" step="0.1" value="2"><b>kg</b></div></label>
           </div>
           <div class="stock-cards">
             <article><span>Mevcut stok</span><strong id="stockCurrent">0 kg</strong><small>Hammadde</small></article>
@@ -243,7 +251,7 @@
             <span class="tag" id="colorStockTag">0 renk</span>
           </div>
           <div class="table-wrap"><table class="stock-table color-stock-table">
-            <thead><tr><th>Renk</th><th>Stokta</th><th>Plan için gerekli</th><th>Kalan</th><th>Durum</th><th></th></tr></thead>
+            <thead><tr><th>Renk</th><th>Stokta</th><th>Ağırlıklı ort. fiyat</th><th>Plan için gerekli</th><th>Kalan</th><th>Durum</th><th></th></tr></thead>
             <tbody id="colorStockRows"></tbody>
           </table></div>
           <div id="colorStockEmpty" class="empty-state">Henüz renk stoğu yok. Aşağıdaki alım formundan renk adı ve miktar girerek ilk stoğu ekle.</div>
@@ -261,8 +269,8 @@
             <p class="muted">Rengi, miktarı ve fiyatı gir. Aynı renk tekrar girilirse mevcut stoğun üzerine eklenir. Fiyat güncel fiyattan farklıysa enflasyon takipçisine otomatik kaydedilir.</p>
             <form id="stockForm" class="sales-form stock-entry-form">
               <label class="field"><span>Renk</span><input id="stockAddColor" type="text" list="stockColorList" maxlength="24" placeholder="Örn. Siyah" autocomplete="off" required></label>
-              <label class="field"><span>Alınan miktar (kg)</span><input id="stockAddKg" type="number" min="0.01" step="0.1" value="1" required></label>
-              <label class="field"><span>Alım fiyatı (TL / kg)</span><input id="stockAddPrice" type="number" min="0" step="0.01" value="700" required></label>
+              <label class="field"><span>Alınan miktar (kg)</span><input id="stockAddKg" type="number" min="0.01" max="100000" step="0.01" value="1" required></label>
+              <label class="field"><span>Alım fiyatı (TL / kg)</span><input id="stockAddPrice" type="number" min="0.01" max="1000000" step="0.01" value="700" required></label>
               <label class="field"><span>Alım tarihi</span><input id="stockAddDate" type="date" required></label>
               <button class="btn btn-primary" type="submit"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Stoğa ekle</button>
             </form>
@@ -298,6 +306,86 @@
 <li>Bir ürünün fotoğrafına veya satırına tıklandığında ürün detayı açılır; o üründe kullanılan renkler, her renkten kaç gram kullanıldığı ve büyük ürün fotoğrafı görüntülenir.</li><li>Satış kaydında ciro, maliyet ve kâr saklanır; haftalık ve aylık özetler seçilen döneme göre güncellenir.</li></ul><p class="note">Tüm ürünler, satışlar, maliyet parametreleri ve fiyat geçmişi Google Firebase Realtime Database'de saklanır. Başka bir cihazdan veya mobil veriyle girdiğinde aynı veriler onValue dinleyicisiyle anlık olarak yüklenir; tarayıcı hafızası kullanılmaz.</p></article>
         </div>
       </section>
+      <section class="page-section maintenance-page" id="maintenance">
+        <section class="panel">
+          <div class="section-heading">
+            <div><p class="eyebrow">06 / BAKIM &amp; GİDER</p><h2>Bakım &amp; Gider Yönetimi</h2><p class="muted">Her satıştan alınan teorik bakım payı bu havuzda birikir. Gerçek nozzle, PEI, fan ve diğer masrafları buradan düşerek fonun gerçek durumunu takip et.</p></div>
+            <span class="tag">Otomatik tahakkuk</span>
+          </div>
+          <div class="stock-cards maintenance-cards">
+            <article><span>Biriken bakım fonu</span><strong id="maintenanceBalance">₺0,00</strong><small>Satışlardan aktarılan teorik pay</small></article>
+            <article><span>Toplam tahakkuk</span><strong id="maintenanceAccrued">₺0,00</strong><small>Tüm satışların bakım payı</small></article>
+            <article><span>Toplam gerçek masraf</span><strong id="maintenanceSpent">₺0,00</strong><small>Fondan düşülen tutar</small></article>
+            <article><span>Masraf kayıtları</span><strong id="maintenanceCount">0 masraf kaydı</strong><small>Ayrıntı aşağıda</small></article>
+          </div>
+          <p class="note">Tahakkuk formülü: <strong>satılan adet × (parti toplam süresi ÷ parti adedi) × saatlik bakım ücreti</strong>. Bakım ücreti “Maliyet parametreleri” bölümündeki <strong>Aşınma &amp; bakım fonu (TL/saat)</strong> alanından gelir.</p>
+        </section>
+        <section class="panel">
+          <div class="section-heading"><div><p class="eyebrow">GERÇEK MASRAF</p><h2>Bakım masrafı gir</h2><p class="muted">Girilen tutar aynı anda hem masraf kaydına yazılır hem biriken fondan düşülür.</p></div></div>
+          <form id="maintenanceForm" class="sales-form maintenance-form" novalidate>
+            <label class="field"><span>Açıklama</span><input id="maintenanceDescription" type="text" maxlength="120" placeholder="Örn. Nozzle değişimi" required></label>
+            <label class="field"><span>Tutar (TL)</span><input id="maintenanceAmount" type="number" min="0.01" max="100000000" step="0.01" value="" required></label>
+            <label class="field"><span>Tarih</span><input id="maintenanceDate" type="date" required></label>
+            <label class="field"><span>Değişen parça</span><select id="maintenancePart">
+              <option value="Nozzle">Nozzle</option>
+              <option value="PEI">PEI</option>
+              <option value="Fan">Fan</option>
+              <option value="PTFE">PTFE</option>
+              <option value="Ekstruder dişlisi">Ekstruder dişlisi</option>
+              <option value="Bakım hizmeti">Bakım hizmeti</option>
+              <option value="Diğer">Diğer</option>
+            </select></label>
+            <button class="btn btn-primary sale-submit" type="submit"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Masrafı kaydet ve fondan düş</button>
+          </form>
+        </section>
+        <section class="panel">
+          <div class="color-stock-head"><div><h3>Gerçek bakım masraf geçmişi</h3><p class="muted">Kayıt silindiğinde tutar otomatik olarak bakım fonuna iade edilir.</p></div><span class="tag" id="maintenanceTag">Gider takibi</span></div>
+          <div class="table-wrap"><table class="history-table maintenance-table">
+            <thead><tr><th>Tarih</th><th>Açıklama</th><th>Değişen parça</th><th>Tutar</th><th></th></tr></thead>
+            <tbody id="maintenanceRows"></tbody>
+          </table></div>
+          <div id="maintenanceEmpty" class="empty-state">Henüz gerçek bakım masrafı girilmedi. İlk masrafını yukarıdaki formdan ekleyebilirsin.</div>
+        </section>
+      </section>
+
+      <section class="page-section settings-page" id="settings">
+        <section class="panel">
+          <div class="section-heading">
+            <div><p class="eyebrow">07 / AYARLAR</p><h2>Ayarlar &amp; Veri Yönetimi</h2><p class="muted">Tüm Firebase verilerini Excel’e aktar, ham JSON yedeği al veya daha önce aldığın bir yedeği güvenle geri yükle.</p></div>
+            <span class="tag">Yedekleme merkezi</span>
+          </div>
+          <div class="data-actions">
+            <article class="data-card">
+              <h3>Excel’e aktar (.xlsx)</h3>
+              <p class="muted">Ürünler, satışlar, filament stoğu, parametreler ve bakım kayıtları ayrı çalışma sayfalarına yazılır. Tablo başlıkları filtrelenebilir ve sütunlar genişletilmiştir.</p>
+              <button class="btn btn-primary" id="exportExcelBtn" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/></svg>Tüm Verileri Excel’e Aktar (.xlsx)</button>
+            </article>
+            <article class="data-card">
+              <h3>Yedek indir (.json)</h3>
+              <p class="muted">Firebase Realtime Database düğümünün tamamı ham JSON olarak indirilir. Felaket kurtarma için önerilir.</p>
+              <button class="btn btn-ghost" id="exportJsonBtn" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/></svg>Yedek İndir (.json)</button>
+            </article>
+            <article class="data-card">
+              <h3>Yedekten geri yükle (.json)</h3>
+              <p class="muted">Dosya yapısı doğrulanır, onay alındıktan sonra mevcut veriler yedekle değiştirilir. Oturum hesapları korunur.</p>
+              <button class="btn btn-ghost" id="restoreJsonBtn" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>Yedekten Geri Yükle</button>
+              <input id="restoreJsonInput" type="file" accept=".json,application/json" hidden>
+            </article>
+            <article class="data-card">
+              <h3>CSV dışa aktar</h3>
+              <p class="muted">Seçili veri setini Excel veya Google Sheets’te açabileceğin noktalı virgüllü CSV dosyası olarak indir.</p>
+              <label class="field"><span>Veri seti</span><select id="csvDataset">
+                <option value="sales">Satışlar</option>
+                <option value="products">Ürünler</option>
+                <option value="stock">Filament stoğu</option>
+              </select></label>
+              <button class="btn btn-ghost" id="exportCsvBtn" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/></svg>CSV indir</button>
+            </article>
+          </div>
+          <p class="note">Geri yükleme tüm `printcost` düğümünü değiştirir. İşlem öncesinde güncel bir JSON yedeği almanız önerilir. Yedekte <strong>auth</strong> düğümü yoksa mevcut oturum hesapları otomatik olarak korunur.</p>
+        </section>
+      </section>
+
       <footer>PrintCost · 3D baskı maliyet hesaplayıcı <span>Veriler Firebase bulutunda saklanır</span></footer>
     </main>
   </div>
@@ -377,6 +465,7 @@
       </div>
     </section>
   </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>

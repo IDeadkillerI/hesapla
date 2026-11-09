@@ -2075,3 +2075,52 @@ html.theme-reveal{animation:pc-circular-reveal .72s cubic-bezier(.22,.75,.18,1) 
 }
 .btn-danger{color:#fff!important;background:linear-gradient(135deg,#c24141,#a92f3c)!important;border:1px solid rgba(248,113,113,.32)!important;box-shadow:0 8px 22px rgba(185,28,28,.16)}
 .btn-danger:hover{filter:brightness(1.08);transform:translateY(-1px)}
+
+/* =========================================================
+   PrintCost — doğrulama, bakım fonu ve veri yönetimi eklentileri
+   ========================================================= */
+input.is-invalid,
+.sales-form input.is-invalid,
+.input-wrap:has(input.is-invalid){
+  border-color:rgba(224,82,82,.72)!important;
+  box-shadow:0 0 0 3px rgba(224,82,82,.16)!important;
+}
+input.is-invalid:focus{outline:none}
+.field>span small{white-space:normal}
+
+.maintenance-cards strong{font-variant-numeric:tabular-nums}
+.maintenance-form{grid-template-columns:repeat(2,minmax(0,1fr))}
+.maintenance-form .sale-submit{grid-column:1 / -1}
+.maintenance-table td:last-child{text-align:right}
+
+.data-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.data-card{
+  display:flex;flex-direction:column;gap:12px;
+  padding:20px;
+  border:1px solid var(--line);
+  border-radius:var(--r-lg);
+  background:rgba(var(--ov),.02);
+  transition:border-color .2s ease,background .2s ease;
+}
+.data-card:hover{border-color:var(--line-strong);background:rgba(var(--ov),.035)}
+.data-card h3{font:600 15px/1.3 var(--font-display);letter-spacing:-.02em;color:var(--text-strong)}
+.data-card p{font-size:12px;line-height:1.65;color:var(--muted-2);margin:0}
+.data-card .btn{align-self:flex-start;margin-top:auto}
+.data-card .field{margin:2px 0}
+.data-card .field>span{display:block;margin-bottom:7px;font-size:12px;font-weight:500;color:var(--text-2)}
+.data-card select{
+  display:block;width:100%;min-height:40px;
+  padding:8px 12px;
+  border:1px solid var(--line);
+  border-radius:var(--r-md);
+  background:rgba(var(--ink),.6);
+  color:var(--text);
+  font:400 13px var(--font-ui);
+  outline:none;
+}
+.data-card select:focus{border-color:rgba(var(--accent-rgb),.55);box-shadow:0 0 0 3px rgba(var(--accent-rgb),.12)}
+
+@media (max-width:920px){
+  .data-actions{grid-template-columns:1fr}
+  .maintenance-form{grid-template-columns:1fr}
+}
