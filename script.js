@@ -24,6 +24,7 @@ function showPage(pageId) {
   if (target) target.scrollIntoView({behavior:'smooth', block:'start'});
   // Sayfaya her girişte grafikler sıfırdan dolar.
   if (pageId === 'analysis' && typeof playCostChart === 'function') playCostChart(true);
+  requestAnimationFrame(syncSlidingPills);
   if (pageId === 'inventory' && typeof playPriceBars === 'function') playPriceBars(true);
   if (pageId === 'sales' && typeof playSalesChart === 'function') playSalesChart(true);
 }
@@ -1493,25 +1494,37 @@ document.addEventListener('keydown', event => {
    Tercihler (tema, kenar çubuğu, oturum) tarayıcıda küçük anahtarlar olarak
    tutulur; iş verileri hâlâ yalnızca Firebase'dedir.
    ========================================================= */
-const THEMES = { dark:'#09090b', light:'#f4f5f7', midnight:'#050b1a', glass:'#0b1030', olive:'#0b0e08', carbon:'#070707', indigo:'#0d0f18' };
+const THEMES = { dark:'#09090b', light:'#f4f5f7', midnight:'#050b1a', glass:'#0b1030', olive:'#0b0e08', carbon:'#070707', indigo:'#0d0f18', 'modern-dark':'#08090d', 'clean-light':'#f7f8fa', forest:'#07130f', 'midnight-blue':'#050b1a' };
 function prefGet(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
 function prefSet(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* gizli mod vb. */ } }
 function prefDel(key) { try { localStorage.removeItem(key); } catch (e) { /* yoksay */ } }
 
 /* ---------- Tema ---------- */
-function applyTheme(name, animate) {
+function applyTheme(name, animate, originEvent) {
   const theme = THEMES[name] ? name : 'dark';
   const root = document.documentElement;
-  if (animate) {
-    root.classList.add('theme-anim');
-    setTimeout(() => root.classList.remove('theme-anim'), 350);
-  }
-  root.setAttribute('data-theme', theme);
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', THEMES[theme]);
-  document.querySelectorAll('[data-theme-choice]').forEach(btn =>
-    btn.setAttribute('aria-checked', String(btn.dataset.themeChoice === theme)));
-  prefSet('pc_theme', theme);
+  const update = () => {
+    root.setAttribute('data-theme', theme);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', THEMES[theme]);
+    document.querySelectorAll('[data-theme-choice]').forEach(btn =>
+      btn.setAttribute('aria-checked', String(btn.dataset.themeChoice === theme)));
+    prefSet('pc_theme', theme);
+  };
+  if (!animate) { update(); return; }
+  if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (originEvent && Number.isFinite(originEvent.clientX)) root.style.setProperty('--theme-origin-x', `${originEvent.clientX}px`);
+    if (originEvent && Number.isFinite(originEvent.clientY)) root.style.setProperty('--theme-origin-y', `${originEvent.clientY}px`);
+    document.startViewTransition(update);
+  } else if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const x = originEvent && Number.isFinite(originEvent.clientX) ? originEvent.clientX : innerWidth - 36;
+    const y = originEvent && Number.isFinite(originEvent.clientY) ? originEvent.clientY : 36;
+    root.style.setProperty('--theme-origin-x', `${x}px`);
+    root.style.setProperty('--theme-origin-y', `${y}px`);
+    root.classList.remove('theme-reveal'); update(); void root.offsetWidth;
+    root.classList.add('theme-reveal');
+    setTimeout(() => root.classList.remove('theme-reveal'), 760);
+  } else update();
 }
 function setThemeMenu(open) {
   const menu = $('themeMenu'), btn = $('themeToggle');
@@ -1524,7 +1537,7 @@ function initThemeBar() {
   applyTheme(prefGet('pc_theme') || 'dark', false);
   $('themeToggle').addEventListener('click', () => setThemeMenu($('themeMenu').hidden));
   document.querySelectorAll('[data-theme-choice]').forEach(btn =>
-    btn.addEventListener('click', () => { applyTheme(btn.dataset.themeChoice, true); setThemeMenu(false); $('themeToggle').focus(); }));
+    btn.addEventListener('click', event => { applyTheme(btn.dataset.themeChoice, true, event); setThemeMenu(false); $('themeToggle').focus(); }));
   document.addEventListener('click', event => {
     if ($('themeMenu').hidden) return;
     if (!event.target.closest('#themeMenu') && !event.target.closest('#themeToggle')) setThemeMenu(false);
@@ -1533,6 +1546,19 @@ function initThemeBar() {
     if (event.key === 'Escape' && !$('themeMenu').hidden) { setThemeMenu(false); $('themeToggle').focus(); }
   });
 }
+
+function syncSlidingPills() {
+  document.querySelectorAll('.seg, .sale-mode').forEach(group => {
+    const buttons = [...group.querySelectorAll('.seg-btn, .sale-mode-btn, [data-sale-mode], [data-chart-type], [data-chart-range]')];
+    const active = buttons.find(button => button.classList.contains('active'));
+    if (!active) return;
+    const g = group.getBoundingClientRect(), b = active.getBoundingClientRect();
+    group.style.setProperty('--pill-x', `${b.left - g.left + group.scrollLeft}px`);
+    group.style.setProperty('--pill-w', `${b.width}px`);
+    group.classList.add('has-sliding-pill');
+  });
+}
+window.addEventListener('resize', syncSlidingPills, {passive:true});
 
 /* ---------- Açılır-kapanır kenar çubuğu ---------- */
 function setSidebar(collapsed, persist) {
@@ -2006,6 +2032,7 @@ function syncSalesChartControls() {
     const on = !SC.hidden.has(b.dataset.series);
     b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on));
   });
+  syncSlidingPills();
 }
 // forceMode: 'zero' (sıfırdan büyür) | 'tween' (mevcut değerlerden akıcı geçiş) | undefined (veri değişince)
 function renderSalesChart(forceMode) {
@@ -2170,6 +2197,7 @@ function setSaleMode(mode) {
     const on = btn.dataset.saleMode === mode;
     btn.classList.toggle('active', on); btn.setAttribute('aria-selected', String(on));
   });
+  syncSlidingPills();
   if (pkgOn) syncPackageProducts();
 }
 function savePackageSale(event) {
