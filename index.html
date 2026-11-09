@@ -140,8 +140,8 @@
       <section class="panel" id="products">
         <div class="section-heading product-heading"><div><p class="eyebrow">02 / ÜRÜNLER</p><h2>Ürün maliyet tablosu</h2><p class="muted">Adet, toplam gram, partinin toplam baskı süresi ve satış fiyatını gir. Süreye bağlı giderler adede bölünerek birim maliyet ve tahmini kâr otomatik hesaplanır.</p></div><button class="btn btn-primary" id="addProduct"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Yeni ürün</button></div>
         <div class="table-toolbar"><div class="searchbox"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg><input id="searchInput" placeholder="Ürün ara..."></div><span class="muted" id="rowCount">2 ürün</span></div>
-        <div class="table-wrap"><table>
-          <thead><tr><th>Fotoğraf</th><th>Ürün adı</th><th>Adet</th><th>Toplam gram</th><th>Baskı süresi (saat)</th><th>Gram / adet</th><th>Renkler</th><th>Filament / adet</th><th>Elektrik / adet</th><th>Stand / adet</th><th>Amortisman / adet</th><th>Aşınma / adet</th><th>Fire payı / adet</th><th>Çakmak / adet</th><th>Birim maliyet</th><th>Satış fiyatı</th><th>Birim kâr</th><th>Toplam maliyet</th><th></th></tr></thead>
+        <div class="bulk-toolbar" id="productBulkToolbar" hidden><span id="productBulkCount">0 ürün seçildi</span><label class="bulk-raise">Zam (%) <input id="productBulkPercent" type="number" min="0" max="500" step="0.1" value="10"></label><button class="btn btn-ghost" id="productBulkRaise" type="button">Fiyatları güncelle</button><button class="btn btn-danger" id="productBulkDelete" type="button">Seçilenleri sil</button><button class="btn btn-ghost" id="productBulkClear" type="button">Seçimi temizle</button></div><div class="table-wrap"><table>
+          <thead><tr><th><input type="checkbox" id="productSelectAll" aria-label="Tüm ürünleri seç"></th><th>Fotoğraf</th><th>Ürün adı</th><th>Adet</th><th>Toplam gram</th><th>Baskı süresi (saat)</th><th>Gram / adet</th><th>Renkler</th><th>Filament / adet</th><th>Elektrik / adet</th><th>Stand / adet</th><th>Amortisman / adet</th><th>Aşınma / adet</th><th>Fire payı / adet</th><th>Çakmak / adet</th><th>Birim maliyet</th><th>Satış fiyatı</th><th>Birim kâr</th><th>Toplam maliyet</th><th></th></tr></thead>
           <tbody id="productRows"></tbody>
         </table></div>
         <div class="table-footer"><span>Ürünler Firebase Realtime Database'de canlı olarak saklanır ve tüm cihazlara anlık yansır.</span><strong id="totalFooter">Toplam maliyet: ₺0,00</strong></div>
@@ -213,8 +213,8 @@
           <div><label for="salesPeriod">Kayıt dönemi</label><select id="salesPeriod"><option value="week">Bu hafta</option><option value="month" selected>Bu ay</option><option value="all">Tüm kayıtlar</option></select></div>
           <span id="salesRange" class="muted"></span>
         </div>
-        <div class="table-wrap"><table class="sales-table">
-          <thead><tr><th>Tarih</th><th>Ürün</th><th>Adet</th><th>Birim fiyat</th><th>Ciro</th><th>Birim maliyet</th><th>Toplam maliyet</th><th>Net kâr</th><th>Not</th><th>Detay</th><th></th></tr></thead>
+        <div class="bulk-toolbar" id="salesBulkToolbar" hidden><span id="salesBulkCount">0 satış seçildi</span><button class="btn btn-danger" id="salesBulkDelete" type="button">Seçilenleri sil</button><button class="btn btn-ghost" id="salesBulkClear" type="button">Seçimi temizle</button></div><div class="table-wrap"><table class="sales-table">
+          <thead><tr><th><input type="checkbox" id="salesSelectAll" aria-label="Tüm satışları seç"></th><th>Tarih</th><th>Ürün</th><th>Adet</th><th>Birim fiyat</th><th>Ciro</th><th>Birim maliyet</th><th>Toplam maliyet</th><th>Net kâr</th><th>Not</th><th>Detay</th><th></th></tr></thead>
           <tbody id="salesRows"></tbody>
         </table></div>
         <div id="salesEmpty" class="empty-state">Henüz satış kaydı yok. İlk satışını yukarıdaki formdan ekleyebilirsin.</div>
@@ -379,6 +379,7 @@
   </div>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
   <script src="firebase-config.js"></script>
   <script src="script.js"></script>
 </body>

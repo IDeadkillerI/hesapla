@@ -55,6 +55,7 @@ let detailProductId = null;
 let lastCommittedParams = clone(defaults);
 const dirtyParamKeys = new Set();
 let cloudReady = false;
+let firebaseConnected = false;
 let paramsInitialized = false;
 let db = null;
 let rootRef = null;
@@ -63,6 +64,10 @@ let productsRef = null;
 let salesRef = null;
 let historyRef = null;
 let filamentStockRef = null;
+let storage = null;
+const selectedProducts = new Set(), selectedSales = new Set();
+const pendingDeletes = new Map();
+let hiddenSince = 0;
 
 /* ---------- Firebase başlatma ve canlı dinleyiciler ---------- */
 function setCloudStatus(mode, text, sub) {
@@ -97,6 +102,9 @@ function initFirebase() {
   try {
     firebase.initializeApp(cfg);
     db = firebase.database();
+    // Firebase Realtime Database Web SDK, sekme açıkken yerel write-queue ve otomatik retry sağlar.
+    // Android/iOS'a özgü setPersistenceEnabled() Web SDK'da bulunmadığından çağrılmaz.
+    storage = firebase.storage();
     rootRef = db.ref(CLOUD_ROOT);
     paramsRef = rootRef.child('params');
     productsRef = rootRef.child('products');
@@ -117,10 +125,11 @@ function initFirebase() {
 function attachCloudListeners() {
   db.ref('.info/connected').on('value', snap => {
     const connected = snap.val() === true;
+    firebaseConnected = connected;
     setCloudStatus(
       connected ? 'online' : 'offline',
       connected ? 'Bulut bağlı · veriler Firebase’de' : 'Bağlantı kuruluyor…',
-      connected ? 'Tüm cihazlar aynı canlı veriyi görür.' : 'İnternet bağlantısı bekleniyor.'
+      connected ? 'Bulut bağlı; bekleyen sekme içi yazmalar eşitleniyor.' : 'Bağlantı yok; sekme açık kaldığı sürece yazmalar kuyruklanır.'
     );
   }, error => cloudError(error, 'bağlantı durumu'));
 
@@ -166,17 +175,20 @@ function attachCloudListeners() {
   productsRef.on('value', snap => {
     const value = snap.val() || {};
     state.products = Object.entries(value)
+      .filter(([id]) => !pendingDeletes.has(`product:${id}`))
       .map(([id, product]) => ({id, ...product}))
       .sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0));
     renderProducts();
     renderSales();
+    migrateLegacyProductPhotos();
   }, error => cloudError(error, 'ürünleri okuma'));
 
   // Satışlar
   salesRef.on('value', snap => {
     const value = snap.val() || {};
-    sales = Object.entries(value).map(([id, record]) => ({id, ...record}));
+    sales = Object.entries(value).filter(([id]) => !pendingDeletes.has(`sale:${id}`)).map(([id, record]) => ({id, ...record}));
     renderSales();
+    migrateLegacySalePhotos();
   }, error => cloudError(error, 'satışları okuma'));
 
   // Maliyet / fiyat geçmişi
@@ -195,6 +207,41 @@ function attachCloudListeners() {
     renderProducts();
     renderInventory();
   }, error => cloudError(error, 'filament stoğunu okuma'));
+}
+
+async function migrateLegacyProductPhotos() {
+  if (!storage || !cloudReady) return;
+  for (const product of state.products) {
+    if (!/^data:image\//i.test(String(product.photo||''))) continue;
+    try {
+      const response=await fetch(product.photo); const blob=await response.blob();
+      const path=`printcost/products/${product.id}/migrated-${Date.now()}`;
+      const snapshot=await storage.ref(path).put(blob,{contentType:blob.type||'image/png'});
+      const url=await snapshot.ref.getDownloadURL();
+      await productsRef.child(product.id).update({photo:url});
+      product.photo=url;
+    } catch(error) { console.warn('Eski ürün fotoğrafı Storage’a taşınamadı:',product.id,error); }
+  }
+  renderProducts();
+}
+
+async function migrateLegacySalePhotos() {
+  if (!storage || !cloudReady || !sales.length) return;
+  for (const sale of sales) {
+    const legacyPhoto=sale.costSnapshot?.product?.photo;
+    if (!/^data:image\//i.test(String(legacyPhoto||''))) continue;
+    try {
+      let url=productById(sale.productId)?.photo;
+      if (!url || /^data:image\//i.test(String(url))) {
+        const response=await fetch(legacyPhoto); const blob=await response.blob();
+        const path=`printcost/sales/${sale.id}/snapshot-${Date.now()}`;
+        const snapshot=await storage.ref(path).put(blob,{contentType:blob.type||'image/png'});
+        url=await snapshot.ref.getDownloadURL();
+      }
+      await salesRef.child(sale.id).child('costSnapshot/product/photo').set(url);
+      sale.costSnapshot.product.photo=url;
+    } catch(error) { console.warn('Eski satış fotoğrafı Storage’a taşınamadı:',sale.id,error); }
+  }
 }
 
 // Eski tek değerli filamentStockKg kaydı varsa "Genel" rengine taşınır.
@@ -228,7 +275,7 @@ function flushParamWrites() {
 }
 function writeProductItem(id, fields) {
   if (!cloudReady || !id) return;
-  productsRef.child(id).update(fields).catch(error => cloudError(error, 'ürünü güncelleme'));
+  return productsRef.child(id).update(fields).catch(error => cloudError(error, 'ürünü güncelleme'));
 }
 function writeColorStock(color, kg) {
   if (!cloudReady) { toast('Bulut bağlantısı kurulmadan stok kaydedilemez.'); return Promise.reject(new Error('offline')); }
@@ -239,6 +286,124 @@ function writeColorStock(color, kg) {
 function deleteColorStock(color) {
   if (!cloudReady) { toast('Bulut bağlantısı kurulmadan stok silinemez.'); return; }
   filamentStockRef.child(color).remove().catch(error => cloudError(error, 'renk stoğu silme'));
+}
+
+/* ---------- Kurumsal veri doğrulama, stok kilidi ve geri alma ---------- */
+function parseStrictNumber(value, {min=0, max=Number.MAX_SAFE_INTEGER, integer=false}={}) {
+  const raw = String(value ?? '').trim().replace(',', '.');
+  if (!raw) return {ok:false, reason:'Boş değer'};
+  const number = Number(raw);
+  if (!Number.isFinite(number)) return {ok:false, reason:'Geçersiz sayısal değer'};
+  if (number < min || number > max || (integer && !Number.isInteger(number))) return {ok:false, reason:'Değer izin verilen aralıkta değil'};
+  return {ok:true, value:number};
+}
+function validateNumericElement(el, {silent=false}={}) {
+  if (!el || el.type !== 'number') return true;
+  const min = el.min === '' ? 0 : Number(el.min);
+  const max = el.max === '' ? Number.MAX_SAFE_INTEGER : Number(el.max);
+  const integer = el.step === '1';
+  const parsed = parseStrictNumber(el.value, {min:Number.isFinite(min)?min:0,max:Number.isFinite(max)?max:Number.MAX_SAFE_INTEGER,integer});
+  if (!parsed.ok) {
+    el.setCustomValidity(parsed.reason);
+    el.setAttribute('aria-invalid','true');
+    if (!silent) toast(`${el.getAttribute('aria-label') || el.closest('label')?.innerText || 'Sayısal alan'}: ${parsed.reason}.`, 'warning');
+    return false;
+  }
+  el.setCustomValidity(''); el.removeAttribute('aria-invalid');
+  return true;
+}
+document.addEventListener('focusout', event => {
+  if (event.target?.matches?.('input[type="number"]')) validateNumericElement(event.target);
+});
+document.addEventListener('input', event => {
+  if (event.target?.matches?.('input[type="number"]')) validateNumericElement(event.target,{silent:true});
+});
+function requiredStockForProduct(product, qty) {
+  const waste = 1 + Math.min(90, Math.max(0, params().wasteRate))/100;
+  const colors = productColors(product);
+  if (colors.length) return colors.filter(c=>c.grams>0).map(c=>({color:c.name,kg:c.grams*qty*waste/1000}));
+  const grams = unitGrams(product);
+  return grams > 0 ? [{color:null,kg:grams*qty*waste/1000}] : [];
+}
+function stockGuardMessage() { return 'Yetersiz Stok / Tedarik Gerekli'; }
+function commitSaleWithStock(record, requirements) {
+  if (!cloudReady || !rootRef) return Promise.reject(new Error('Bulut bağlantısı kurulmadan satış kaydedilemez.'));
+  if (!firebaseConnected) { toast('Bağlantı yok. Stok doğrulamalı satış, stok güvenliği için bağlantı gelene kadar engellendi.','warning'); return Promise.reject(new Error('offline-stock-guard')); }
+  const saleRef = salesRef.push();
+  let shortage = false;
+  return new Promise((resolve,reject)=>{
+    rootRef.transaction(current=>{
+      shortage = false;
+      const root = current || {};
+      const stock = {...(root.filamentStock || {})};
+      for (const req of requirements) {
+        if (req.color) {
+          const available = Math.max(0,Number(stock[req.color])||0);
+          if (available + 1e-9 < req.kg) { shortage = true; return; }
+          stock[req.color] = Math.round((available-req.kg)*1000)/1000;
+        } else {
+          let remaining = req.kg;
+          const keys = Object.keys(stock).sort((a,b)=>(Number(stock[b])||0)-(Number(stock[a])||0));
+          const total = keys.reduce((sum,key)=>sum+Math.max(0,Number(stock[key])||0),0);
+          if (total + 1e-9 < remaining) { shortage = true; return; }
+          for (const key of keys) {
+            if (remaining <= 1e-9) break;
+            const available = Math.max(0,Number(stock[key])||0);
+            const used = Math.min(available,remaining);
+            stock[key] = Math.round((available-used)*1000)/1000;
+            remaining -= used;
+          }
+        }
+      }
+      root.filamentStock = stock;
+      root.sales = {...(root.sales || {}), [saleRef.key]:record};
+      return root;
+    }, (error, committed)=>{
+      if (error) { cloudError(error,'stok kontrollü satış'); reject(error); return; }
+      if (!committed) {
+        if (shortage) { toast(`${stockGuardMessage()}. Satış kaydedilmedi.`, 'warning'); reject(new Error('insufficient-stock')); }
+        else reject(new Error('transaction-aborted'));
+        return;
+      }
+      resolve(saleRef.key);
+    }, false);
+  });
+}
+function undoableDelete(type, id, record, ref, label) {
+  const key = `${type}:${id}`;
+  if (pendingDeletes.has(key)) return;
+  pendingDeletes.set(key,{record,ref,timer:null});
+  if (type==='product') { state.products=state.products.filter(x=>String(x.id)!==String(id)); renderProducts(); renderSales(); }
+  else { sales=sales.filter(x=>String(x.id)!==String(id)); renderSales(); }
+  const stack=$('toastStack');
+  const el=document.createElement('div'); el.className='toast toast-info undo-toast'; el.setAttribute('role','status');
+  el.innerHTML=`<span class="toast-icon">↶</span><div class="toast-body"><strong>Silme beklemede</strong><p>${esc(label)} · 5 saniye içinde geri alabilirsin.</p></div><button type="button" class="undo-action">Geri Al</button><i class="toast-progress"></i>`;
+  stack.appendChild(el);
+  let remaining=5000,started=Date.now(),timer;
+  const finish=async restore=>{
+    clearTimeout(timer); const pending=pendingDeletes.get(key); if(!pending)return;
+    pendingDeletes.delete(key); el.remove();
+    if(restore){
+      try { await ref.set(record); toast('Kayıt geri yüklendi.','success'); }
+      catch(error){cloudError(error,'kaydı geri yükleme');}
+    } else {
+      try { await ref.remove(); toast('Kayıt silindi.','success'); }
+      catch(error){pendingDeletes.set(key,pending); if(type==='product')state.products.push({id,...record});else sales.push({id,...record});renderProducts();renderSales();cloudError(error,'kayıt silme');}
+    }
+  };
+  el.querySelector('.undo-action').addEventListener('click',()=>finish(true));
+  el.addEventListener('mouseenter',()=>{clearTimeout(timer);remaining-=Date.now()-started;});
+  el.addEventListener('mouseleave',()=>{started=Date.now();timer=setTimeout(()=>finish(false),remaining);});
+  timer=setTimeout(()=>finish(false),remaining); pendingDeletes.get(key).timer=timer;
+}
+function syncBulkToolbars() {
+  const pt=$('productBulkToolbar'), st=$('salesBulkToolbar');
+  if(pt){pt.hidden=!selectedProducts.size;$('productBulkCount').textContent=`${selectedProducts.size} ürün seçildi`;}
+  if(st){st.hidden=!selectedSales.size;$('salesBulkCount').textContent=`${selectedSales.size} satış seçildi`;}
+}
+function refreshTableLabels(table) {
+  if(!table)return; const labels=[...table.querySelectorAll('thead th')].map(th=>th.textContent.trim());
+  table.querySelectorAll('tbody tr').forEach(row=>[...row.children].forEach((cell,i)=>{if(labels[i])cell.dataset.label=labels[i];}));
 }
 
 /* ---------- Genel yardımcılar ---------- */
@@ -571,7 +736,7 @@ function renderProducts() {
     tr.dataset.productRow = p.id;
     tr.title = 'Ürün detayı için tıkla';
     tr.innerHTML = `
-      <td class="photo-cell"><div class="product-photo-wrap">${p.photo ? `<button class="product-photo-btn" type="button" data-product-detail="${esc(p.id)}" aria-label="${esc(p.name)} detayını aç" title="Ürün detayını aç"><img class="product-photo" src="${p.photo}" alt="${esc(p.name)} fotoğrafı" loading="lazy"><span class="photo-zoom-hint" aria-hidden="true">⤢</span></button>` : '<div class="photo-placeholder">Fotoğraf<br>yok</div>'}<label class="photo-upload">Fotoğraf seç<input type="file" accept="image/*" data-photo-id="${esc(p.id)}" aria-label="${esc(p.name)} fotoğrafı yükle"></label></div></td>
+      <td data-label="Seç"><input type="checkbox" class="row-select" data-select-product="${esc(p.id)}" aria-label="${esc(p.name)} ürününü seç" ${selectedProducts.has(String(p.id))?'checked':''}></td><td class="photo-cell"><div class="product-photo-wrap">${p.photo ? `<button class="product-photo-btn" type="button" data-product-detail="${esc(p.id)}" aria-label="${esc(p.name)} detayını aç" title="Ürün detayını aç"><img class="product-photo" src="${p.photo}" alt="${esc(p.name)} fotoğrafı" loading="lazy"><span class="photo-zoom-hint" aria-hidden="true">⤢</span></button>` : '<div class="photo-placeholder">Fotoğraf<br>yok</div>'}<label class="photo-upload">Fotoğraf seç<input type="file" accept="image/*" data-photo-id="${esc(p.id)}" aria-label="${esc(p.name)} fotoğrafı yükle"></label></div></td>
       <td><input class="name-input" aria-label="Ürün adı" data-pid="${esc(p.id)}" data-k="name" value="${esc(p.name)}"></td>
       <td><input type="number" min="0" step="1" aria-label="Adet" data-pid="${esc(p.id)}" data-k="qty" value="${Number(p.qty)||0}"></td>
       <td><input type="number" min="0" step="0.1" aria-label="Toplam gram" data-pid="${esc(p.id)}" data-k="grams" value="${Number(p.grams)||0}"></td>
@@ -583,6 +748,7 @@ function renderProducts() {
       <td><div class="row-actions"><button class="detail-btn" data-product-detail="${esc(p.id)}" type="button" title="Ürün detayını aç">Detay</button><button class="delete-btn" data-delete="${esc(p.id)}" title="Ürünü sil" aria-label="Ürünü sil">×</button></div></td>`;
     rows.appendChild(tr);
   });
+  refreshTableLabels(rows.closest('table')); syncBulkToolbars();
   const all = state.products.map(p=>({p,c:calc(p,x)}));
   const units = state.products.reduce((sum,p)=>sum+(Number(p.qty)||0),0);
   const total = all.reduce((sum,item)=>sum+item.c.total,0);
@@ -764,14 +930,18 @@ function renderInventory() {
     return `<tr><td>${dateText}</td><td>${esc(pt.source || 'Sistem')}</td><td>${money(oldPrice)}</td><td><strong>${money(newPrice)}</strong></td><td class="${pct>=0?'profit-negative':'profit-positive'}">${pct>=0?'+':''}${fmt(pct,1)}%</td><td>${esc(pt.note || '')}</td></tr>`;
   }).join('');
   $('inflationEmpty').style.display = rows.length ? 'none' : 'block';
+  refreshTableLabels($('colorStockRows')?.closest('table'));
+  refreshTableLabels($('stockRows')?.closest('table'));
+  refreshTableLabels($('inflationRows')?.closest('table'));
 }
 function saveStockEntry(event) {
   event.preventDefault();
   if (!cloudReady) { toast('Bulut bağlantısı kurulmadan stok kaydedilemez.'); return; }
   const color = sanitizeColorName($('stockAddColor').value);
   if (!color) { toast('Eklemek için bir renk adı gir.'); return; }
-  const kg = Math.max(0, num('stockAddKg'));
-  const price = Math.max(0, num('stockAddPrice'));
+  if (!validateNumericElement($('stockAddKg')) || !validateNumericElement($('stockAddPrice'))) return;
+  const kg = parseStrictNumber($('stockAddKg').value,{min:0.01}).value;
+  const price = parseStrictNumber($('stockAddPrice').value,{min:0}).value;
   const dateValue = $('stockAddDate').value || todayISO();
   if (!kg) { toast('Eklemek için en az 0,01 kg girmelisin.'); return; }
   const previous = params().filamentPrice;
@@ -860,8 +1030,9 @@ function renderSales() {
   $('statProfitCaption').textContent = sales.length ? `Yapılan ${sales.length} satış kaydından` : 'Henüz satış kaydı yok';
   $('salesEmpty').style.display = records.length ? 'none' : 'block';
   $('salesRows').innerHTML = records.map(s=>`<tr class="${s.type==='package'?'is-package':''}">
-    <td>${esc(s.date)}</td><td>${saleNameCell(s)}</td><td>${saleQtyCell(s)}</td><td>${money(s.unitPrice)}</td><td class="money">${money(s.revenue)}</td><td>${money(s.unitCost)}</td><td>${money(s.totalCost)}</td><td class="${s.profit>=0?'profit-positive':'profit-negative'}">${money(s.profit)}</td><td>${esc(s.note||'')}</td><td><button class="detail-btn" data-sale-detail="${esc(s.id)}" type="button">Fiyat detayı</button></td><td><button class="delete-btn" data-sale-delete="${esc(s.id)}" title="Satış kaydını sil" aria-label="Satış kaydını sil">×</button></td>
+    <td><input type="checkbox" class="row-select" data-select-sale="${esc(s.id)}" aria-label="Satışı seç" ${selectedSales.has(String(s.id))?'checked':''}></td><td>${esc(s.date)}</td><td>${saleNameCell(s)}</td><td>${saleQtyCell(s)}</td><td>${money(s.unitPrice)}</td><td class="money">${money(s.revenue)}</td><td>${money(s.unitCost)}</td><td>${money(s.totalCost)}</td><td class="${s.profit>=0?'profit-positive':'profit-negative'}">${money(s.profit)}</td><td>${esc(s.note||'')}</td><td><button class="detail-btn" data-sale-detail="${esc(s.id)}" type="button">Fiyat detayı</button></td><td><button class="delete-btn" data-sale-delete="${esc(s.id)}" title="Satış kaydını sil" aria-label="Satış kaydını sil">×</button></td>
   </tr>`).join('');
+  refreshTableLabels($('salesRows')?.closest('table')); syncBulkToolbars();
   renderCostHistory();
   renderSalesChart();
 }
@@ -879,8 +1050,9 @@ function saveSale(event) {
   if (!cloudReady) { toast('Bulut bağlantısı kurulmadan satış kaydedilemez.'); return; }
   const product = productById($('saleProduct').value);
   if (!product) { toast('Önce ürün maliyet tablosuna ürün ekle.'); return; }
-  const qty = Math.max(1,Math.floor(num('saleQty')));
-  const unitPrice = num('salePrice');
+  if (!validateNumericElement($('saleQty')) || !validateNumericElement($('salePrice'))) return;
+  const qty = Math.floor(parseStrictNumber($('saleQty').value,{min:1,integer:true}).value);
+  const unitPrice = parseStrictNumber($('salePrice').value,{min:0}).value;
   const unitCost = calc(product,params()).unit;
   const record = {
     date: $('saleDate').value || todayISO(), productId:product.id, productName:product.name || 'İsimsiz ürün',
@@ -888,12 +1060,12 @@ function saveSale(event) {
     revenue:qty*unitPrice, totalCost:qty*unitCost, profit:qty*(unitPrice-unitCost),
     note:$('saleNote').value.trim(), createdAt:Date.now()
   };
-  salesRef.push(record)
+  commitSaleWithStock(record, requiredStockForProduct(product,qty))
     .then(() => {
       $('saleQty').value = 1; $('saleNote').value = '';
       toast(`Satış buluta kaydedildi. Net kâr: ${money(record.profit)}`);
     })
-    .catch(error => cloudError(error, 'satış kaydetme'));
+    .catch(error => { if(!['insufficient-stock','offline-stock-guard'].includes(error.message)) cloudError(error, 'satış kaydetme'); });
 }
 
 function recordParameterChanges() {
@@ -933,6 +1105,7 @@ function renderCostHistory() {
     return `<tr><td>${dateText}</td><td>${esc(item.label)}</td><td>${fmt(item.oldValue)}${unit}</td><td><strong>${fmt(item.newValue)}${unit}</strong></td><td><button class="delete-btn" type="button" data-history-delete="${esc(item.id)}" aria-label="Maliyet değişim kaydını sil" title="Kaydı sil">×</button></td></tr>`;
   }).join('');
   $('historyEmpty').style.display = rows.length ? 'none' : 'block';
+  refreshTableLabels(tbody.closest('table'));
 }
 function showSaleDetails(id) {
   const sale = sales.find(item=>String(item.id)===String(id));
@@ -974,18 +1147,27 @@ inputIds.forEach(id=>{
   const el = $(id);
   if (!el) return;
   el.addEventListener('input',()=>{
+    if(!validateNumericElement(el,{silent:true})) return;
     dirtyParamKeys.add(id);
     state[id]=num(id);
     renderProducts(); renderSales();
     queueParamWrite(id, state[id]);
   });
-  el.addEventListener('change',()=>{ state[id]=num(id); recordParameterChanges(); });
+  el.addEventListener('change',()=>{ if(!validateNumericElement(el)){el.value=lastCommittedParams[id] ?? defaults[id];return;} state[id]=num(id); recordParameterChanges(); });
 });
 stockInputIds.forEach(id=>{
   const el = $(id); if (!el) return;
-  el.addEventListener('input',()=>{ state[id]=num(id); renderProducts(); queueParamWrite(id, state[id]); });
-  el.addEventListener('change',()=>{ state[id]=num(id); queueParamWrite(id, state[id]); renderInventory(); });
+  el.addEventListener('input',()=>{ if(!validateNumericElement(el,{silent:true}))return; state[id]=num(id); renderProducts(); queueParamWrite(id, state[id]); });
+  el.addEventListener('change',()=>{ if(!validateNumericElement(el)){el.value=state[id] ?? defaults[id];return;} state[id]=num(id); queueParamWrite(id, state[id]); renderInventory(); });
 });
+async function uploadOptimizedPhoto(canvas, id) {
+  if (!storage) throw new Error('Firebase Storage başlatılamadı.');
+  const blob = await new Promise(resolve=>canvas.toBlob(resolve,'image/webp',0.82));
+  if (!blob) throw new Error('Fotoğraf optimize edilemedi.');
+  const path=`printcost/products/${id}/${Date.now()}.webp`;
+  const snapshot=await storage.ref(path).put(blob,{contentType:'image/webp',cacheControl:'public,max-age=31536000'});
+  return snapshot.ref.getDownloadURL();
+}
 function processPhotoFile(file, id) {
   if (!cloudReady) { toast('Bulut bağlantısı kurulmadan fotoğraf yüklenemez.'); return; }
   const product = productById(id);
@@ -995,28 +1177,21 @@ function processPhotoFile(file, id) {
   const reader = new FileReader();
   reader.onload = () => {
     const img = new Image();
-    img.onload = () => {
-      const maxSide = 640;
-      const scale = Math.min(1,maxSide/Math.max(img.width,img.height));
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1,Math.round(img.width*scale));
-      canvas.height = Math.max(1,Math.round(img.height*scale));
-      canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
-      // Düz renkli stüdyo arka planı algılanırsa şeffaflaştırılır (başarısızsa fotoğraf olduğu gibi kalır).
-      const bgResult = removeBackground(canvas);
-      // PNG olarak kaydet: alfa kanalı korunur, şeffaf alanlar siyaha dönüşmez.
-      const dataUrl = canvas.toDataURL('image/png');
-      if (dataUrl.length > 1800000) { toast('Fotoğraf bulut kaydı için çok büyük. Daha küçük bir görsel seç.'); return; }
-      product.photo = dataUrl;
-      writeProductItem(id, {photo:dataUrl});
-      renderProducts();
-      toast(bgResult === 'done' ? 'Ürün fotoğrafı Firebase’e kaydedildi; arka plan şeffaflaştırıldı.' : 'Ürün fotoğrafı Firebase’e kaydedildi.');
+    img.onload = async () => {
+      try {
+        const maxSide=640, scale=Math.min(1,maxSide/Math.max(img.width,img.height));
+        const canvas=document.createElement('canvas');
+        canvas.width=Math.max(1,Math.round(img.width*scale)); canvas.height=Math.max(1,Math.round(img.height*scale));
+        canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+        const bgResult=removeBackground(canvas);
+        const url=await uploadOptimizedPhoto(canvas,id);
+        await productsRef.child(id).update({photo:url}); product.photo=url; renderProducts();
+        toast(bgResult==='done'?'Ürün fotoğrafı optimize edilerek Firebase Storage’a yüklendi; veritabanına yalnızca URL kaydedildi.':'Ürün fotoğrafı Firebase Storage’a yüklendi; veritabanına yalnızca URL kaydedildi.','success');
+      } catch(error) { cloudError(error,'fotoğrafı Storage’a yükleme'); }
     };
-    img.onerror = () => toast('Fotoğraf okunamadı.');
-    img.src = reader.result;
+    img.onerror=()=>toast('Fotoğraf okunamadı.'); img.src=reader.result;
   };
-  reader.onerror = () => toast('Fotoğraf yüklenemedi.');
-  reader.readAsDataURL(file);
+  reader.onerror=()=>toast('Fotoğraf yüklenemedi.'); reader.readAsDataURL(file);
 }
 
 $('productRows').addEventListener('change',event=>{
@@ -1028,13 +1203,15 @@ $('productRows').addEventListener('change',event=>{
   }
   const el=event.target; if (!el.dataset.pid || !el.dataset.k) return;
   const product=productById(el.dataset.pid); if(!product)return;
+  if (el.type==='number' && !validateNumericElement(el)) { el.value=product[el.dataset.k] ?? 0; return; }
   const key=el.dataset.k;
   if (key === 'name') {
     product.name = el.value;
     writeProductItem(product.id, {name: product.name});
   } else if (key === 'qty') {
-    const qty = Math.max(0, Number(el.value) || 0);
-    product.qty = qty;
+    const qty = parseStrictNumber(el.value,{min:0,integer:true}).value;
+    const previous={...product}; product.qty=qty;
+    if(stockCalc().items.some(item=>item.shortfall>0)){Object.assign(product,previous);el.value=previous.qty;toast(`${stockGuardMessage()}. Üretim adedi artırılamadı.`,'warning');return;}
     const fields = {qty};
     const raw = rawColors(product);
     if (raw.length) {
@@ -1044,8 +1221,8 @@ $('productRows').addEventListener('change',event=>{
     }
     writeProductItem(product.id, fields);
   } else if (key === 'grams') {
-    const grams = Math.max(0, Number(el.value) || 0);
-    product.grams = grams;
+    const grams = parseStrictNumber(el.value,{min:0}).value;
+    const previous={...product,colors:clone(product.colors||[])}; product.grams=grams;
     const fields = {grams};
     const qty = Math.max(0, Number(product.qty) || 0);
     const raw = rawColors(product).map(color => ({
@@ -1062,6 +1239,7 @@ $('productRows').addEventListener('change',event=>{
       }));
       fields.colors = product.colors;
     }
+    if(stockCalc().items.some(item=>item.shortfall>0)){Object.assign(product,previous);el.value=previous.grams;toast(`${stockGuardMessage()}. Gramaj değişikliği kaydedilmedi.`,'warning');return;}
     writeProductItem(product.id, fields);
   } else {
     product[key] = Math.max(0, Number(el.value) || 0);
@@ -1078,10 +1256,8 @@ $('productRows').addEventListener('click',event=>{
     if (!cloudReady) { toast('Bulut bağlantısı kurulmadan ürün silinemez.'); return; }
     confirmDialog({ title:'Ürünü sil', message:`"${product.name||'Ürün'}" ürünü silinecek. Satış geçmişindeki kayıtlar korunur.`, confirmText:'Ürünü sil', danger:true }).then(ok=>{
       if(!ok) return;
-      state.products = state.products.filter(item=>String(item.id)!==String(product.id));
-      renderProducts(); renderSales();
-      productsRef.child(product.id).remove().catch(error=>cloudError(error,'ürün silme'));
-      toast('Ürün buluttan silindi.');
+      const copy={...product}; delete copy.id;
+      undoableDelete('product',product.id,copy,productsRef.child(product.id),`“${product.name||'Ürün'}”`);
     });
     return;
   }
@@ -1098,10 +1274,9 @@ $('salesRows').addEventListener('click',event=>{
   if (!cloudReady) { toast('Bulut bağlantısı kurulmadan satış silinemez.'); return; }
   confirmDialog({ title:'Satış kaydını sil', message:`${record?.productName||'Bu'} satış kaydı silinecek.`, confirmText:'Kaydı sil', danger:true }).then(ok=>{
     if(!ok) return;
-    sales=sales.filter(s=>String(s.id)!==button.dataset.saleDelete);
-    renderSales();
-    salesRef.child(button.dataset.saleDelete).remove().catch(error=>cloudError(error,'satış silme'));
-    toast('Satış kaydı buluttan silindi.');
+    if(!record)return;
+    const copy={...record}; delete copy.id;
+    undoableDelete('sale',record.id,copy,salesRef.child(record.id),`“${record.productName||'Satış'}”`);
   });
 });
 $('costHistoryRows').addEventListener('click',event=>{
@@ -1120,6 +1295,37 @@ $('costHistoryRows').addEventListener('click',event=>{
   });
 });
 $('saleForm').addEventListener('submit',saveSale);
+
+// Toplu seçim, yüzde zam ve geri alınabilir toplu silme.
+$('productRows').addEventListener('change',event=>{
+  const box=event.target.closest('[data-select-product]'); if(!box)return;
+  const id=String(box.dataset.selectProduct); box.checked?selectedProducts.add(id):selectedProducts.delete(id); syncBulkToolbars();
+});
+$('salesRows').addEventListener('change',event=>{
+  const box=event.target.closest('[data-select-sale]'); if(!box)return;
+  const id=String(box.dataset.selectSale); box.checked?selectedSales.add(id):selectedSales.delete(id); syncBulkToolbars();
+});
+$('productSelectAll')?.addEventListener('change',event=>{state.products.forEach(p=>event.target.checked?selectedProducts.add(String(p.id)):selectedProducts.delete(String(p.id)));renderProducts();});
+$('salesSelectAll')?.addEventListener('change',event=>{filteredSales().records.forEach(s=>event.target.checked?selectedSales.add(String(s.id)):selectedSales.delete(String(s.id)));renderSales();});
+$('productBulkClear')?.addEventListener('click',()=>{selectedProducts.clear();renderProducts();});
+$('salesBulkClear')?.addEventListener('click',()=>{selectedSales.clear();renderSales();});
+$('productBulkRaise')?.addEventListener('click',async()=>{
+  const parsed=parseStrictNumber($('productBulkPercent').value,{min:0,max:500}); if(!parsed.ok){toast('Zam oranı 0–500 arasında geçerli bir sayı olmalı.','warning');return;}
+  const targets=state.products.filter(p=>selectedProducts.has(String(p.id))); if(!targets.length)return;
+  const updates={}; targets.forEach(p=>{const sale=Math.round((Number(p.sale)||0)*(1+parsed.value/100)*100)/100;updates[`${p.id}/sale`]=sale;p.sale=sale;});
+  try{await productsRef.update(updates);toast(`${targets.length} ürünün fiyatı %${fmt(parsed.value,1)} artırıldı.`,'success');renderProducts();}catch(error){cloudError(error,'toplu fiyat güncelleme');}
+});
+$('productBulkDelete')?.addEventListener('click',async()=>{
+  const targets=state.products.filter(p=>selectedProducts.has(String(p.id))); if(!targets.length)return;
+  if(!await confirmDialog({title:'Toplu ürün silme',message:`${targets.length} ürün 5 saniye boyunca geri alınabilir şekilde silinecek.`,confirmText:'Seçilenleri sil',danger:true}))return;
+  selectedProducts.clear(); targets.forEach(p=>{const copy={...p};delete copy.id;undoableDelete('product',p.id,copy,productsRef.child(p.id),`“${p.name||'Ürün'}”`);});
+});
+$('salesBulkDelete')?.addEventListener('click',async()=>{
+  const targets=sales.filter(s=>selectedSales.has(String(s.id))); if(!targets.length)return;
+  if(!await confirmDialog({title:'Toplu satış silme',message:`${targets.length} satış kaydı 5 saniye boyunca geri alınabilir şekilde silinecek.`,confirmText:'Seçilenleri sil',danger:true}))return;
+  selectedSales.clear(); targets.forEach(s=>{const copy={...s};delete copy.id;undoableDelete('sale',s.id,copy,salesRef.child(s.id),`“${s.productName||'Satış'}”`);});
+});
+
 $('stockForm').addEventListener('submit',saveStockEntry);
 $('saleProduct').addEventListener('change',()=>{const p=productById($('saleProduct').value); if(p && Number(p.sale)>0) $('salePrice').value=p.sale;});
 $('salesPeriod').addEventListener('change',renderSales);
@@ -1166,10 +1372,12 @@ function saveDetailColors(colors) {
   const clean = colors
     .map(color => ({name: sanitizeColorName(color.name), grams: Math.max(0, Number(color.grams) || 0)}))
     .filter(color => color.name || color.grams > 0);
+  const previous={...product,colors:clone(product.colors||[])};
   const qty = Math.max(0, Number(product.qty) || 0);
   const unit = clean.reduce((sum, color) => sum + color.grams, 0);
   product.colors = clean;
   product.grams = Math.round(unit * qty * 100) / 100;
+  if(stockCalc().items.some(item=>item.shortfall>0)){Object.assign(product,previous);toast(`${stockGuardMessage()}. Renk/gramaj planı kaydedilmedi.`,'warning');renderProductDetail();return;}
   writeProductItem(product.id, {colors: clean.length ? clean : null, grams: product.grams});
   renderProducts(); renderSales();
 }
@@ -1239,7 +1447,8 @@ function addDetailColor() {
   const nameInput = $('detailNewColor');
   const gramsInput = $('detailNewGrams');
   const name = sanitizeColorName(nameInput?.value);
-  const grams = Math.max(0, Number(gramsInput?.value) || 0);
+  if (gramsInput && !validateNumericElement(gramsInput)) return;
+  const grams = gramsInput ? parseStrictNumber(gramsInput.value,{min:0}).value : 0;
   if (!name && !grams) { toast('Renk adı veya gram gir.'); return; }
   const colors = detailColorList(product);
   colors.push({name, grams});
@@ -1254,7 +1463,7 @@ function updateDetailColor(index, field, value) {
   const colors = detailColorList(product);
   if (!colors[index]) return;
   if (field === 'name') colors[index].name = sanitizeColorName(value);
-  else colors[index].grams = Math.max(0, Number(value) || 0);
+  else { const parsed=parseStrictNumber(value,{min:0}); if(!parsed.ok){toast('Gram değeri boş veya geçersiz olamaz.','warning');renderProductDetail(product);return;} colors[index].grams=parsed.value; }
   saveDetailColors(colors);
 }
 if ($('productDetailModal')) {
@@ -1282,6 +1491,7 @@ if ($('productDetailModal')) {
     }
     const colorInput = event.target.closest('[data-color-index]');
     if (!colorInput) return;
+    if(colorInput.type==='number' && !validateNumericElement(colorInput)) { renderProductDetail(productById(detailProductId)); return; }
     updateDetailColor(Number(colorInput.dataset.colorIndex), colorInput.dataset.colorField, colorInput.value);
   });
 }
@@ -1292,7 +1502,8 @@ if ($('colorStockRows')) {
     const input = event.target.closest('input[data-color-stock]');
     if (!input) return;
     const color = input.dataset.colorStock;
-    const kg = Math.max(0, Number(input.value) || 0);
+    if(!validateNumericElement(input)){input.value=Number(filamentStock[color])||0;return;}
+    const kg = parseStrictNumber(input.value,{min:0}).value;
     filamentStock[color] = kg;
     renderProducts(); renderSales(); renderInventory();
     writeColorStock(color, kg)
@@ -1687,6 +1898,15 @@ async function initAuth() {
   }
   showLogin('');
 }
+
+// Arka planda 5 dakikadan uzun kalan oturum, sekmeye dönüldüğünde kapatılır.
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){hiddenSince=Date.now();return;}
+  if(hiddenSince && Date.now()-hiddenSince>=5*60*1000){hiddenSince=0;toast('Güvenlik nedeniyle 5 dakikalık arka plan zaman aşımı oluştu.','warning');signOut();}
+  hiddenSince=0;
+});
+window.addEventListener('pagehide',()=>{if(!document.hidden)hiddenSince=Date.now();});
+
 function initLoginForm() {
   $('passToggle').addEventListener('click', () => {
     const input = $('loginPassword');
@@ -1815,12 +2035,7 @@ function makeProductPhotoTransparent(id) {
     const result = removeBackground(canvas);
     if (result === 'already') { toast('Bu fotoğraf zaten şeffaf arka plana sahip.', 'info'); return; }
     if (result !== 'done') { toast('Düz bir arka plan algılanamadı; fotoğraf değiştirilmedi.', 'warning'); return; }
-    const dataUrl = canvas.toDataURL('image/png');
-    if (dataUrl.length > 1800000) { toast('Fotoğraf bulut kaydı için çok büyük. Daha küçük bir görsel seç.'); return; }
-    product.photo = dataUrl;
-    writeProductItem(id, {photo: dataUrl});
-    renderProducts();
-    toast('Fotoğrafın arka planı şeffaflaştırıldı ve buluta kaydedildi.');
+    uploadOptimizedPhoto(canvas,id).then(url=>productsRef.child(id).update({photo:url}).then(()=>{product.photo=url;renderProducts();toast('Fotoğraf şeffaflaştırıldı ve Firebase Storage’a yüklendi.','success');})).catch(error=>cloudError(error,'şeffaf fotoğrafı yükleme'));
   };
   img.onerror = () => toast('Fotoğraf okunamadı.');
   img.src = product.photo;
@@ -2203,6 +2418,9 @@ function setSaleMode(mode) {
 function savePackageSale(event) {
   event.preventDefault();
   if (!cloudReady) { toast('Bulut bağlantısı kurulmadan satış kaydedilemez.'); return; }
+  if (!validateNumericElement($('pkgQty')) || !validateNumericElement($('pkgPrice'))) return;
+  const packageQtyInputs=[...$('pkgItemRows').querySelectorAll('input[type=number]')];
+  if(packageQtyInputs.some(input=>!validateNumericElement(input)))return;
   const c = pkgCompute();
   if (!c.lines.length || c.lines.some(l => !l.p || l.qty < 1)) {
     toast('Her satır için bir ürün seç ve adedi en az 1 gir.', 'warning'); return;
@@ -2244,7 +2462,8 @@ function savePackageSale(event) {
       capturedAt: new Date().toISOString()
     }
   };
-  salesRef.push(record)
+  const requirements = [...merged.values()].map(line => requiredStockForProduct(line.p, line.qty * c.pq)).flat();
+  commitSaleWithStock(record, requirements)
     .then(() => {
       PKG.items = [{productId:'', qty:1}];
       $('pkgName').value = ''; $('pkgNote').value = ''; $('pkgQty').value = 1; $('pkgPrice').value = 0;
@@ -2252,7 +2471,7 @@ function savePackageSale(event) {
       renderPackageRows();
       toast(`Paket satışı buluta kaydedildi. Net kâr: ${money(record.profit)}`);
     })
-    .catch(error => cloudError(error, 'paket satışı kaydetme'));
+    .catch(error => { if(!['insufficient-stock','offline-stock-guard'].includes(error.message)) cloudError(error, 'paket satışı kaydetme'); });
 }
 function saleNameCell(sale) {
   if (sale.type !== 'package') return esc(sale.productName);

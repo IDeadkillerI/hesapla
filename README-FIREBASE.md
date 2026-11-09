@@ -63,10 +63,18 @@ printcost/
   Ürün detay modalında renk eklenip çıkarılabilir; toplam gram otomatik güncellenir.
 - Parametre değişiklikleri `update()` ile ilgili alanlara yazılır.
 - Ürün ekleme/silme `push()` / `remove()` ile yapılır.
-- Her yazma sonrası `onValue` dinleyicisi tüm açık sekmeleri günceller.
-- Fotoğraflar 480 px PNG olarak ürün kaydında base64 saklanır. Çok sayıda fotoğraf
-  kullanacaksan Firebase Storage'a taşımak daha uygundur (Realtime Database'de
-  düğüm başına 10 MB sınırı vardır).
+- Her yazma sonrası `onValue` dinleyicisi tüm açık sekmeleri günceller. Realtime Database Web SDK, sekme açık kaldığı sürece çevrimdışı yazmaları bellekte kuyruğa alır ve bağlantı gelince otomatik tekrar gönderir. Bu kuyruk sekme kapatılır/yenilenirse diskte saklanmaz; Web SDK'da Android/iOS'taki `setPersistenceEnabled()` API'si yoktur. Satışlar stok düşümü ve satış kaydını tek Realtime Database transaction'ında yazar.
+- Ürün fotoğrafları istemci tarafında 640 px sınırında küçültülür, WebP olarak optimize edilir ve Firebase Storage'a yüklenir. Realtime Database'de yalnızca indirme URL'si (`photo`) saklanır. Eski Base64 fotoğraflar giriş sonrası Storage'a taşınır ve kayıtları URL ile güncellenir.
+
+
+## 2.1 Kurumsal stok, fotoğraf ve oturum ayarları
+
+- Tekli ve paket satışları, renk bazlı filament stoğunu önce kontrol eder. Yetersiz stokta satış kaydı oluşturulmaz; stok ve satış aynı veritabanı transaction'ında güncellenir. Renksiz ürünler mevcut renk stoklarından sırayla düşülür.
+- Üretim adet/gramaj değişiklikleri, mevcut ürün planları için stok yeterliliği kontrolünden geçer. Sayısal alanlar boş, NaN, negatif veya tanımlı sınırların dışındaysa kaydedilmez ve Toast gösterilir.
+- Ürün/satış silme işlemleri 5 saniye geciktirilir; bu sürede Geri Al ile kayıt eski anahtarına geri yüklenebilir. Ürün tablosunda toplu silme ve yüzde bazlı satış fiyatı artırma; satış geçmişinde toplu silme bulunur. Tarihsel satış fiyatları muhasebe tutarlılığı için toplu zamdan etkilenmez.
+- Ürün fotoğrafları için `firebase-storage-compat.js` yüklenir. Firebase Console → Storage bölümünü etkinleştir ve Storage Rules ile uygulamanın kullanıcı modeline uygun erişim izni tanımla. **Bu projedeki mevcut giriş sistemi Realtime Database içinde tutulan özel bir oturum/hash kontrolüdür; Firebase Authentication oturumu değildir.** Bu nedenle `request.auth != null` kullanan Storage kuralları, Firebase Authentication ayrıca entegre edilmeden bu yüklemelere izin vermez. Güvenli canlı kullanımda Firebase Authentication'a geçiş ve Storage kurallarının `request.auth != null` ile sınırlandırılması gerekir; herkese açık yazma kuralı kullanma.
+- Uygulama sekmesi arka planda 5 dakika veya daha uzun kaldıktan sonra tekrar görünür olduğunda oturum kapatılır. Bağlantı kesikken ürün/parametre gibi normal yazmalar sekme açık kaldığı sürece Firebase Web SDK kuyruğunda tutulur; stok transaction'ı gerektiren satışlar stok güvenliği için çevrimdışıyken engellenir.
+- 768 px altındaki ekranlarda ürün, satış ve envanter tabloları etiketli kart düzenine geçer.
 
 ## 3. Güvenlik kuralları
 
