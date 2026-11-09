@@ -67,7 +67,6 @@ let filamentStockRef = null;
 let maintenanceFundRef = null;
 let maintenanceLogsRef = null;
 let presenceRef = null;
-let storage = null;
 // Bakım & gider fonu (printcost/maintenanceFund) ve gerçek masraf kayıtları.
 let maintenanceFund = {balance:0, totalAccrued:0, totalSpent:0, updatedAt:0};
 let maintenanceLogs = [];
@@ -112,7 +111,6 @@ function initFirebase() {
     db = firebase.database();
     // Firebase Realtime Database Web SDK, sekme açıkken yerel write-queue ve otomatik retry sağlar.
     // Android/iOS'a özgü setPersistenceEnabled() Web SDK'da bulunmadığından çağrılmaz.
-    storage = firebase.storage();
     rootRef = db.ref(CLOUD_ROOT);
     paramsRef = rootRef.child('params');
     productsRef = rootRef.child('products');
@@ -191,7 +189,6 @@ function attachCloudListeners() {
       .sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0));
     renderProducts();
     renderSales();
-    migrateLegacyProductPhotos();
   }, error => cloudError(error, 'ürünleri okuma'));
 
   // Satışlar
@@ -199,7 +196,6 @@ function attachCloudListeners() {
     const value = snap.val() || {};
     sales = Object.entries(value).filter(([id]) => !pendingDeletes.has(`sale:${id}`)).map(([id, record]) => ({id, ...record}));
     renderSales();
-    migrateLegacySalePhotos();
   }, error => cloudError(error, 'satışları okuma'));
 
   // Maliyet / fiyat geçmişi
@@ -261,41 +257,6 @@ function attachCloudListeners() {
   });
   if (navigator.onLine === false) {
     setCloudStatus('offline', 'İnternet bağlantısı yok', 'Stoklu satışlar bağlantı gelene kadar engellenir.');
-  }
-}
-
-async function migrateLegacyProductPhotos() {
-  if (!storage || !cloudReady) return;
-  for (const product of state.products) {
-    if (!/^data:image\//i.test(String(product.photo||''))) continue;
-    try {
-      const response=await fetch(product.photo); const blob=await response.blob();
-      const path=`printcost/products/${product.id}/migrated-${Date.now()}`;
-      const snapshot=await storage.ref(path).put(blob,{contentType:blob.type||'image/png'});
-      const url=await snapshot.ref.getDownloadURL();
-      await productsRef.child(product.id).update({photo:url});
-      product.photo=url;
-    } catch(error) { console.warn('Eski ürün fotoğrafı Storage’a taşınamadı:',product.id,error); }
-  }
-  renderProducts();
-}
-
-async function migrateLegacySalePhotos() {
-  if (!storage || !cloudReady || !sales.length) return;
-  for (const sale of sales) {
-    const legacyPhoto=sale.costSnapshot?.product?.photo;
-    if (!/^data:image\//i.test(String(legacyPhoto||''))) continue;
-    try {
-      let url=productById(sale.productId)?.photo;
-      if (!url || /^data:image\//i.test(String(url))) {
-        const response=await fetch(legacyPhoto); const blob=await response.blob();
-        const path=`printcost/sales/${sale.id}/snapshot-${Date.now()}`;
-        const snapshot=await storage.ref(path).put(blob,{contentType:blob.type||'image/png'});
-        url=await snapshot.ref.getDownloadURL();
-      }
-      await salesRef.child(sale.id).child('costSnapshot/product/photo').set(url);
-      sale.costSnapshot.product.photo=url;
-    } catch(error) { console.warn('Eski satış fotoğrafı Storage’a taşınamadı:',sale.id,error); }
   }
 }
 
@@ -937,11 +898,20 @@ function renderProducts() {
   if ($('hourlyWear')) $('hourlyWear').textContent = `${money(rates.wear)} / saat`;
   const query = $('searchInput').value.trim().toLocaleLowerCase('tr-TR');
   const rows = $('productRows'); rows.innerHTML = '';
+  // Ürün başına üretilebilir adet: stok yoksa ürün yine listelenir, yalnızca rozet uyarır.
+  const stockItems = new Map(stockCalc(x).items.map(item => [String(item.p.id), item]));
   state.products.forEach(p => {
     p.usesLighter = Boolean(p.usesLighter);
     if (!String(p.name ?? '').toLocaleLowerCase('tr-TR').includes(query)) return;
     const c = calc(p,x);
     const colors = productColors(p);
+    const stockItem = stockItems.get(String(p.id));
+    const productQty = Math.max(0, Number(p.qty) || 0);
+    const stockBadge = !stockItem || stockItem.producible <= 0
+      ? '<span class="stock-badge out" title="Bu ürünü üretmek için yeterli filament stoğu yok">Stokta Yok / 0 Adet</span>'
+      : stockItem.producible < productQty
+        ? `<span class="stock-badge low" title="Mevcut stok planın tamamına yetmiyor">Kısmi stok · ${fmt(stockItem.producible,0)} adet</span>`
+        : '';
     const colorCell = colors.length
       ? `<div class="color-chip-list">${colors.map(color => `<span class="color-chip" title="${esc(color.name || 'Renk')} · adet başına ${fmt(color.grams,1)} g"><i style="background:${colorSwatch(color.name)}"></i>${esc(color.name || 'Renk')} <small>${fmt(color.grams,1)} g</small></span>`).join('')}</div>`
       : '<span class="muted-chip">Renk tanımlanmadı</span>';
@@ -950,8 +920,8 @@ function renderProducts() {
     tr.dataset.productRow = p.id;
     tr.title = 'Ürün detayı için tıkla';
     tr.innerHTML = `
-      <td data-label="Seç"><input type="checkbox" class="row-select" data-select-product="${esc(p.id)}" aria-label="${esc(p.name)} ürününü seç" ${selectedProducts.has(String(p.id))?'checked':''}></td><td class="photo-cell"><div class="product-photo-wrap">${p.photo ? `<button class="product-photo-btn" type="button" data-product-detail="${esc(p.id)}" aria-label="${esc(p.name)} detayını aç" title="Ürün detayını aç"><img class="product-photo" src="${p.photo}" alt="${esc(p.name)} fotoğrafı" loading="lazy"><span class="photo-zoom-hint" aria-hidden="true">⤢</span></button>` : '<div class="photo-placeholder">Fotoğraf<br>yok</div>'}<label class="photo-upload">Fotoğraf seç<input type="file" accept="image/*" data-photo-id="${esc(p.id)}" aria-label="${esc(p.name)} fotoğrafı yükle"></label></div></td>
-      <td><input class="name-input" aria-label="Ürün adı" data-pid="${esc(p.id)}" data-k="name" value="${esc(p.name)}"></td>
+      <td data-label="Seç"><input type="checkbox" class="row-select" data-select-product="${esc(p.id)}" aria-label="${esc(p.name)} ürününü seç" ${selectedProducts.has(String(p.id))?'checked':''}></td><td class="photo-cell"><div class="product-photo-wrap">${p.photo ? `<button class="product-photo-btn" type="button" data-product-detail="${esc(p.id)}" aria-label="${esc(p.name)} detayını aç" title="Ürün detayını aç"><img class="product-photo" src="${p.photo}" alt="${esc(p.name)} fotoğrafı" loading="lazy"><span class="photo-zoom-hint" aria-hidden="true">⤢</span></button>` : '<div class="photo-placeholder">Fotoğraf<br>yok</div>'}<label class="photo-upload">Cihazdan Yükle<input type="file" accept="image/*" data-photo-id="${esc(p.id)}" aria-label="${esc(p.name)} cihazdan fotoğraf yükle"></label></div></td>
+      <td><div class="product-name-cell"><input class="name-input" aria-label="Ürün adı" data-pid="${esc(p.id)}" data-k="name" value="${esc(p.name)}">${stockBadge}</div></td>
       <td><input type="number" min="0" max="100000" step="1" aria-label="Adet" data-pid="${esc(p.id)}" data-k="qty" value="${Number(p.qty)||0}"></td>
       <td><input type="number" min="0" max="10000000" step="0.1" aria-label="Toplam gram" data-pid="${esc(p.id)}" data-k="grams" value="${Number(p.grams)||0}"></td>
       <td><input type="number" min="0" max="100000" step="0.1" aria-label="Baskı süresi saat" data-pid="${esc(p.id)}" data-k="hours" value="${Number(p.hours)||0}" placeholder="Saat"></td>
@@ -1274,7 +1244,8 @@ function snapshotForSale(product, x) {
   const c = calc(product, x);
   return {
     params: clone(x),
-    product: { id: product.id, name: product.name || 'İsimsiz ürün', qty: Number(product.qty)||0, grams: Number(product.grams)||0, hours: Number(product.hours)||0, usesLighter: Boolean(product.usesLighter), photo: product.photo || '', colors: productColors(product) },
+    // Base64 fotoğraf her satışta kopyalanıp veritabanını şişirmesin diye snapshot'a eklenmez.
+    product: { id: product.id, name: product.name || 'İsimsiz ürün', qty: Number(product.qty)||0, grams: Number(product.grams)||0, hours: Number(product.hours)||0, usesLighter: Boolean(product.usesLighter), colors: productColors(product) },
     breakdown: { filament:c.filament, electric:c.electric, stand:c.stand, machine:c.machine, wear:c.wear, fire:c.fire, lighter:c.lighter, unit:c.unit },
     capturedAt: new Date().toISOString()
   };
@@ -1407,16 +1378,27 @@ stockInputIds.forEach(id=>{
   el.addEventListener('input',()=>{ if(!validateNumericElement(el,{silent:true}))return; state[id]=num(id); renderProducts(); queueParamWrite(id, state[id]); });
   el.addEventListener('change',()=>{ if(!validateNumericElement(el)){el.value=state[id] ?? defaults[id];return;} state[id]=num(id); queueParamWrite(id, state[id]); renderInventory(); });
 });
-async function uploadOptimizedPhoto(canvas, id) {
-  if (!storage) throw new Error('Firebase Storage başlatılamadı.');
-  const blob = await new Promise(resolve=>canvas.toBlob(resolve,'image/webp',0.82));
-  if (!blob) throw new Error('Fotoğraf optimize edilemedi.');
-  const path=`printcost/products/${id}/${Date.now()}.webp`;
-  const snapshot=await storage.ref(path).put(blob,{contentType:'image/webp',cacheControl:'public,max-age=31536000'});
-  return snapshot.ref.getDownloadURL();
+// Canvas içeriğini tarayıcının desteklediği en verimli formatta Base64 Data URL'e çevirir.
+// WebP desteklenmiyorsa JPEG'e, o da yoksa tarayıcının varsayılan PNG çıktısına düşer.
+function canvasToDataUrl(canvas, quality = 0.82) {
+  const attempts = [
+    ['image/webp', quality],
+    ['image/webp', Math.max(0.55, quality - 0.18)],
+    ['image/jpeg', quality],
+    ['image/jpeg', Math.max(0.55, quality - 0.18)]
+  ];
+  let dataUrl = '';
+  for (const [type, q] of attempts) {
+    try { dataUrl = canvas.toDataURL(type, q); } catch (error) { continue; }
+    if (dataUrl.startsWith(`data:${type}`)) break;
+  }
+  if (!dataUrl.startsWith('data:image/')) throw new Error('Görsel Base64 formatına dönüştürülemedi.');
+  return dataUrl;
 }
+// Fotoğrafı en fazla 640 px olacak şekilde küçültür, düz arka planı temizler ve
+// sonucu Realtime Database'de doğrudan saklanabilecek Base64 Data URL olarak döndürür.
 function processPhotoFile(file, id) {
-  if (!cloudReady) { toast('Bulut bağlantısı kurulmadan fotoğraf yüklenemez.'); return; }
+  if (!cloudReady) { toast('Bulut bağlantısı kurulmadan fotoğraf kaydedilemez.'); return; }
   const product = productById(id);
   if (!file || !product) return;
   if (!file.type.startsWith('image/')) { toast('Lütfen bir fotoğraf dosyası seç.'); return; }
@@ -1424,17 +1406,37 @@ function processPhotoFile(file, id) {
   const reader = new FileReader();
   reader.onload = () => {
     const img = new Image();
-    img.onload = async () => {
+    img.onload = () => {
       try {
         const maxSide=640, scale=Math.min(1,maxSide/Math.max(img.width,img.height));
         const canvas=document.createElement('canvas');
         canvas.width=Math.max(1,Math.round(img.width*scale)); canvas.height=Math.max(1,Math.round(img.height*scale));
-        canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+        const ctx=canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img,0,0,canvas.width,canvas.height);
         const bgResult=removeBackground(canvas);
-        const url=await uploadOptimizedPhoto(canvas,id);
-        await productsRef.child(id).update({photo:url}); product.photo=url; renderProducts();
-        toast(bgResult==='done'?'Ürün fotoğrafı optimize edilerek Firebase Storage’a yüklendi; veritabanına yalnızca URL kaydedildi.':'Ürün fotoğrafı Firebase Storage’a yüklendi; veritabanına yalnızca URL kaydedildi.','success');
-      } catch(error) { cloudError(error,'fotoğrafı Storage’a yükleme'); }
+        const dataUrl=canvasToDataUrl(canvas,0.82);
+        // Realtime Database yazma boyutunu güvenli sınırda tut.
+        if (dataUrl.length > 2_000_000) {
+          toast('Fotoğraf Base64 olarak çok büyük. Daha düşük çözünürlüklü bir görsel seç.', 'error');
+          return;
+        }
+        productsRef.child(id).update({photo:dataUrl})
+          .then(() => {
+            product.photo=dataUrl;
+            renderProducts();
+            const kb = Math.max(1, Math.round(dataUrl.length/1024));
+            toast(bgResult==='done'
+              ? `Fotoğraf arka planı temizlenerek ${canvas.width}×${canvas.height} px boyutunda Base64 olarak kaydedildi (${kb} KB).`
+              : `Fotoğraf ${canvas.width}×${canvas.height} px boyutunda Base64 olarak kaydedildi (${kb} KB).`,
+              'success');
+          })
+          .catch(error => cloudError(error,'fotoğrafı Realtime Database’e kaydetme'));
+      } catch(error) {
+        console.error('fotoğraf dönüştürme', error);
+        toast('Fotoğraf Base64 formatına dönüştürülemedi.', 'error');
+      }
     };
     img.onerror=()=>toast('Fotoğraf okunamadı.'); img.src=reader.result;
   };
@@ -1457,8 +1459,7 @@ $('productRows').addEventListener('change',event=>{
     writeProductItem(product.id, {name: product.name});
   } else if (key === 'qty') {
     const qty = parseStrictNumber(el.value,{min:0,integer:true}).value;
-    const previous={...product}; product.qty=qty;
-    if(stockCalc().items.some(item=>item.shortfall>0)){Object.assign(product,previous);el.value=previous.qty;toast(`${stockGuardMessage()}. Üretim adedi artırılamadı.`,'warning');return;}
+    product.qty=qty;
     const fields = {qty};
     const raw = rawColors(product);
     if (raw.length) {
@@ -1469,7 +1470,7 @@ $('productRows').addEventListener('change',event=>{
     writeProductItem(product.id, fields);
   } else if (key === 'grams') {
     const grams = parseStrictNumber(el.value,{min:0}).value;
-    const previous={...product,colors:clone(product.colors||[])}; product.grams=grams;
+    product.grams=grams;
     const fields = {grams};
     const qty = Math.max(0, Number(product.qty) || 0);
     const raw = rawColors(product).map(color => ({
@@ -1486,7 +1487,6 @@ $('productRows').addEventListener('change',event=>{
       }));
       fields.colors = product.colors;
     }
-    if(stockCalc().items.some(item=>item.shortfall>0)){Object.assign(product,previous);el.value=previous.grams;toast(`${stockGuardMessage()}. Gramaj değişikliği kaydedilmedi.`,'warning');return;}
     writeProductItem(product.id, fields);
   } else {
     product[key] = Math.max(0, Number(el.value) || 0);
@@ -1619,12 +1619,10 @@ function saveDetailColors(colors) {
   const clean = colors
     .map(color => ({name: sanitizeColorName(color.name), grams: Math.max(0, Number(color.grams) || 0)}))
     .filter(color => color.name || color.grams > 0);
-  const previous={...product,colors:clone(product.colors||[])};
   const qty = Math.max(0, Number(product.qty) || 0);
   const unit = clean.reduce((sum, color) => sum + color.grams, 0);
   product.colors = clean;
   product.grams = Math.round(unit * qty * 100) / 100;
-  if(stockCalc().items.some(item=>item.shortfall>0)){Object.assign(product,previous);toast(`${stockGuardMessage()}. Renk/gramaj planı kaydedilmedi.`,'warning');renderProductDetail();return;}
   writeProductItem(product.id, {colors: clean.length ? clean : null, grams: product.grams});
   renderProducts(); renderSales();
 }
@@ -1680,7 +1678,7 @@ function renderProductDetail() {
     ? `<button class="detail-photo-btn" type="button" data-detail-photo-open aria-label="Fotoğrafı büyüt" title="Büyütmek için tıkla"><img src="${product.photo}" alt="${esc(product.name||'Ürün')} fotoğrafı"><span class="detail-photo-hint">Büyüt ⤢</span></button>`
     : '<div class="detail-photo-empty">Fotoğraf yok</div>';
   if (product.photo) photoEl.innerHTML += '<button class="photo-upload detail-photo-upload" type="button" data-detail-photo-transparent title="Düz renkli arka planı siler">Arka planı şeffaflaştır</button>';
-  photoEl.innerHTML += '<label class="photo-upload detail-photo-upload">Fotoğraf seç<input type="file" accept="image/*" data-detail-photo-upload aria-label="Ürün fotoğrafı yükle"></label>';
+  photoEl.innerHTML += '<label class="photo-upload detail-photo-upload">Cihazdan Yükle<input type="file" accept="image/*" data-detail-photo-upload aria-label="Cihazdan ürün fotoğrafı yükle"></label>';
 }
 function removeDetailColor(index) {
   const product = productById(detailProductId);
@@ -1960,7 +1958,7 @@ document.addEventListener('keydown', event => {
    Tercihler (tema, kenar çubuğu, oturum) tarayıcıda küçük anahtarlar olarak
    tutulur; iş verileri hâlâ yalnızca Firebase'dedir.
    ========================================================= */
-const THEMES = { dark:'#09090b', light:'#f4f5f7', midnight:'#050b1a', glass:'#0b1030', olive:'#0b0e08', carbon:'#070707', indigo:'#0d0f18', 'modern-dark':'#08090d', 'clean-light':'#f7f8fa', forest:'#07130f', 'midnight-blue':'#050b1a' };
+const THEMES = { dark:'#09090b', light:'#f4f5f7', midnight:'#050b1a', glass:'#0b1030', olive:'#0b0e08', carbon:'#070707', indigo:'#0d0f18', 'modern-dark':'#08090d', 'clean-light':'#f7f8fa', forest:'#07130f', 'midnight-blue':'#050b1a', 'admin-v2':'#0b1329', 'dashboard-v26':'#f8fafc' };
 function prefGet(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
 function prefSet(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* gizli mod vb. */ } }
 function prefDel(key) { try { localStorage.removeItem(key); } catch (e) { /* yoksay */ } }
@@ -2290,7 +2288,20 @@ function makeProductPhotoTransparent(id) {
     const result = removeBackground(canvas);
     if (result === 'already') { toast('Bu fotoğraf zaten şeffaf arka plana sahip.', 'info'); return; }
     if (result !== 'done') { toast('Düz bir arka plan algılanamadı; fotoğraf değiştirilmedi.', 'warning'); return; }
-    uploadOptimizedPhoto(canvas,id).then(url=>productsRef.child(id).update({photo:url}).then(()=>{product.photo=url;renderProducts();toast('Fotoğraf şeffaflaştırıldı ve Firebase Storage’a yüklendi.','success');})).catch(error=>cloudError(error,'şeffaf fotoğrafı yükleme'));
+    try {
+      const dataUrl = canvasToDataUrl(canvas, 0.82);
+      if (dataUrl.length > 2_000_000) { toast('Fotoğraf Base64 olarak çok büyük; kaydedilmedi.', 'error'); return; }
+      productsRef.child(id).update({ photo: dataUrl })
+        .then(() => {
+          product.photo = dataUrl;
+          renderProducts();
+          toast('Fotoğraf şeffaflaştırıldı ve Base64 olarak Realtime Database’e kaydedildi.', 'success');
+        })
+        .catch(error => cloudError(error, 'şeffaf fotoğrafı kaydetme'));
+    } catch (error) {
+      console.error('şeffaf fotoğraf dönüştürme', error);
+      toast('Fotoğraf Base64 formatına dönüştürülemedi.', 'error');
+    }
   };
   img.onerror = () => toast('Fotoğraf okunamadı.');
   img.src = product.photo;

@@ -46,7 +46,7 @@ printcost/
 ├── filamentStock/
 │   └── {renkAdı}: kilogram (örn. "Siyah": 1.25)
 ├── products/{pushId}/
-│   ├── name, qty, grams, hours, sale, usesLighter, photo,
+│   ├── name, qty, grams, hours, sale, usesLighter, photo (Base64 Data URL),
 │   ├── colors/ [{ name, grams }]  (renk başına adet gramı)
 │   └── createdAt
 ├── sales/{pushId}/
@@ -64,15 +64,15 @@ printcost/
 - Parametre değişiklikleri `update()` ile ilgili alanlara yazılır.
 - Ürün ekleme/silme `push()` / `remove()` ile yapılır.
 - Her yazma sonrası `onValue` dinleyicisi tüm açık sekmeleri günceller. Realtime Database Web SDK, sekme açık kaldığı sürece çevrimdışı yazmaları bellekte kuyruğa alır ve bağlantı gelince otomatik tekrar gönderir. Bu kuyruk sekme kapatılır/yenilenirse diskte saklanmaz; Web SDK'da Android/iOS'taki `setPersistenceEnabled()` API'si yoktur. Satışlar stok düşümü ve satış kaydını tek Realtime Database transaction'ında yazar.
-- Ürün fotoğrafları istemci tarafında 640 px sınırında küçültülür, WebP olarak optimize edilir ve Firebase Storage'a yüklenir. Realtime Database'de yalnızca indirme URL'si (`photo`) saklanır. Eski Base64 fotoğraflar giriş sonrası Storage'a taşınır ve kayıtları URL ile güncellenir.
+- Ürün fotoğrafları istemci tarafında 640 px sınırında küçültülür, WebP (desteklenmiyorsa JPEG/PNG) olarak optimize edilir ve `FileReader` + canvas ile Base64 Data URL'e dönüştürülür. Sonuç doğrudan `products/{pushId}/photo` alanında metin olarak saklanır; Firebase Storage kullanılmaz. Fotoğraf veritabanı yazma sınırını aşmasın diye Base64 uzunluğu kontrol edilir.
 
 
 ## 2.1 Kurumsal stok, fotoğraf ve oturum ayarları
 
 - Tekli ve paket satışları, renk bazlı filament stoğunu önce kontrol eder. Yetersiz stokta satış kaydı oluşturulmaz; stok ve satış aynı veritabanı transaction'ında güncellenir. Renksiz ürünler mevcut renk stoklarından sırayla düşülür.
-- Üretim adet/gramaj değişiklikleri, mevcut ürün planları için stok yeterliliği kontrolünden geçer. Sayısal alanlar boş, NaN, negatif veya tanımlı sınırların dışındaysa kaydedilmez ve Toast gösterilir.
+- Üretim adet/gramaj değişiklikleri stok yetersiz olsa bile kaydedilir; ürün listesinde "Stokta Yok / 0 Adet" veya "Kısmi stok" rozetiyle uyarılır. Stok kontrolü yalnızca satış kaydında uygulanır. Sayısal alanlar boş, NaN, negatif veya tanımlı sınırların dışındaysa kaydedilmez ve Toast gösterilir.
 - Ürün/satış silme işlemleri 5 saniye geciktirilir; bu sürede Geri Al ile kayıt eski anahtarına geri yüklenebilir. Ürün tablosunda toplu silme ve yüzde bazlı satış fiyatı artırma; satış geçmişinde toplu silme bulunur. Tarihsel satış fiyatları muhasebe tutarlılığı için toplu zamdan etkilenmez.
-- Ürün fotoğrafları için `firebase-storage-compat.js` yüklenir. Firebase Console → Storage bölümünü etkinleştir ve Storage Rules ile uygulamanın kullanıcı modeline uygun erişim izni tanımla. **Bu projedeki mevcut giriş sistemi Realtime Database içinde tutulan özel bir oturum/hash kontrolüdür; Firebase Authentication oturumu değildir.** Bu nedenle `request.auth != null` kullanan Storage kuralları, Firebase Authentication ayrıca entegre edilmeden bu yüklemelere izin vermez. Güvenli canlı kullanımda Firebase Authentication'a geçiş ve Storage kurallarının `request.auth != null` ile sınırlandırılması gerekir; herkese açık yazma kuralı kullanma.
+- Firebase Storage entegrasyonu tamamen kaldırılmıştır; `firebase-storage-compat.js` yüklenmez ve Storage kuralları gerekmez. Fotoğraf yükleme `FileReader` ile okunur, canvas üzerinde en fazla 640 px'e küçültülür ve Base64 Data URL olarak Realtime Database'e yazılır. Veritabanı kurallarında `products` düğümüne yazma izni verilmesi yeterlidir.
 - Uygulama sekmesi arka planda 5 dakika veya daha uzun kaldıktan sonra tekrar görünür olduğunda oturum kapatılır. Bağlantı kesikken ürün/parametre gibi normal yazmalar sekme açık kaldığı sürece Firebase Web SDK kuyruğunda tutulur; stok transaction'ı gerektiren satışlar stok güvenliği için çevrimdışıyken engellenir.
 - 768 px altındaki ekranlarda ürün, satış ve envanter tabloları etiketli kart düzenine geçer.
 
