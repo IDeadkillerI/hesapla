@@ -51,7 +51,8 @@ printcost/
 │   └── createdAt
 ├── sales/{pushId}/
 │   ├── date, productId, productName, qty, unitPrice, unitCost,
-│   └── revenue, totalCost, profit, note, createdAt, costSnapshot
+│   ├── revenue, totalCost, profit, note, createdAt, costSnapshot
+│   └── (paket satışı) type:"package", items[{productId, name, qty, unitCost, lineCost, unitListPrice}], unitsTotal
 └── costHistory/{pushId}/
     └── date, key, label, oldValue, newValue, source, note
 ```
@@ -126,3 +127,27 @@ konsolunda **Realtime Database → Import JSON** ile içe aktarabilirsin; ancak 
 - **Grafikler:** Maliyet dağılımı donut'u saat yönünde dolar, çubuklar sıfırdan büyür; enflasyon
   fiyat çubukları aşağıdan yukarı açılır. Animasyon sayfaya her girişte ve veri değiştiğinde
   çalışır; aynı veri tekrar gelirse yeniden oynatılmaz. `prefers-reduced-motion` açıkken animasyon atlanır.
+
+## 7. Şeffaf fotoğraflar, Glass teması, satış grafikleri ve paket satış
+
+- **Şeffaf ürün fotoğrafları:** Fotoğraf yüklenirken düz renkli (stüdyo/beyaz) arka plan köşelerden
+  taranarak silinir ve görsel alfa kanallı PNG olarak kaydedilir. Köşe renkleri tutarsızsa, görsel
+  zaten şeffafsa veya silinecek alan mantıksızsa fotoğrafa dokunulmaz. Eski fotoğraflar için ürün
+  detay penceresindeki **Arka planı şeffaflaştır** düğmesi kullanılır. Çerçeve ve dikdörtgen zemin
+  kaldırıldığı için görsel her temanın üzerinde yüzer; gölge ürünün siluetini izler.
+- **Glass teması:** Tema menüsünde **Glass** seçeneği. Sabit, hafif bulanık ve yavaşça kayan renk
+  akışı arka planı; `backdrop-filter: blur()` ile yarı saydam paneller; ince parlak kenarlıklar.
+  Arka plan görselini değiştirmek için `style.css` içindeki `--glass-image` değişkenine kendi
+  `url(...)` veya gradient değerini ver. `prefers-reduced-motion` açıkken kayma animasyonu durur.
+- **Satış grafikleri:** Satış Kayıtları sayfasında Çubuk/Çizgi ve Günlük (son 14 gün) / Haftalık
+  (son 12 hafta, Pazartesi başlangıçlı) / Aylık (son 12 ay) filtreleri. Ciro ve net kâr serileri
+  ayrı ayrı açılıp kapatılabilir; üzerine gelince ciro, maliyet, kâr ve adet gösterilir. Filtre veya
+  veri değişince değerler akıcı geçişle güncellenir, sayfaya her girişte grafik sıfırdan büyür.
+  Grafik ek bir kütüphane kullanmaz (saf SVG).
+- **Paket satışı:** **Paket Satış Ekle** sekmesinde ürünler, adetleri, paket adedi ve paket satış
+  fiyatı girilir. Paket maliyeti, ürünlerin o anki birim maliyetlerinin adetle çarpılıp toplanmasıyla,
+  net kâr da *paket fiyatı − paket maliyeti* olarak otomatik hesaplanır. Kayıt, normal satışla aynı
+  alanları (`revenue`, `totalCost`, `profit`) taşıdığı için ciro/kâr kartlarına, dönem özetine ve
+  grafiklere kendiliğinden dahil olur; listede **Paket** etiketiyle ve içerik özetiyle görünür.
+  "Satış adedi" paketlerde içerdeki toplam ürün adedini sayar. Maliyetler satış anında kaydedildiği
+  için ürün fiyatları sonradan değişse de geçmiş kâr değişmez.

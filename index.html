@@ -11,10 +11,10 @@
   <script>
     (function(){try{
       var t=localStorage.getItem('pc_theme');
-      if(['dark','light','midnight','olive','carbon','indigo'].indexOf(t)<0)t='dark';
+      if(['dark','light','midnight','glass','olive','carbon','indigo'].indexOf(t)<0)t='dark';
       document.documentElement.setAttribute('data-theme',t);
       var m=document.querySelector('meta[name="theme-color"]');
-      if(m)m.setAttribute('content',{dark:'#09090b',light:'#f4f5f7',midnight:'#050b1a',olive:'#0b0e08',carbon:'#070707',indigo:'#0d0f18'}[t]);
+      if(m)m.setAttribute('content',{dark:'#09090b',light:'#f4f5f7',midnight:'#050b1a',glass:'#0b1030',olive:'#0b0e08',carbon:'#070707',indigo:'#0d0f18'}[t]);
       if(localStorage.getItem('pc_sidebar')==='collapsed')document.documentElement.setAttribute('data-sb','collapsed');
     }catch(e){document.documentElement.setAttribute('data-theme','dark')}})();
   </script>
@@ -68,6 +68,7 @@
             <button class="theme-option" type="button" role="radio" data-theme-choice="dark" aria-checked="false"><span class="theme-swatch" data-t="dark"></span><span><b>Koyu</b><small>Matte Workshop · varsayılan</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
             <button class="theme-option" type="button" role="radio" data-theme-choice="light" aria-checked="false"><span class="theme-swatch" data-t="light"></span><span><b>Açık</b><small>Ferah beyaz ve gri tonlar</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
             <button class="theme-option" type="button" role="radio" data-theme-choice="midnight" aria-checked="false"><span class="theme-swatch" data-t="midnight"></span><span><b>Gece mavisi</b><small>Yüksek kontrast · camgöbeği vurgu</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
+            <button class="theme-option" type="button" role="radio" data-theme-choice="glass" aria-checked="false"><span class="theme-swatch" data-t="glass"></span><span><b>Glass</b><small>Cam efekti · bulanık arka plan</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
             <p class="theme-menu-title">RENK PALETLERİ</p>
             <button class="theme-option" type="button" role="radio" data-theme-choice="olive" aria-checked="false"><span class="theme-swatch" data-t="olive"></span><span><b>Mat zeytin</b><small>Toprak yeşili · sakin ve mat</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
             <button class="theme-option" type="button" role="radio" data-theme-choice="carbon" aria-checked="false"><span class="theme-swatch" data-t="carbon"></span><span><b>Karbon &amp; neon</b><small>Siyah karbon · neon turuncu</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
@@ -145,6 +146,10 @@
 
       <section class="page-section panel sales-panel" id="sales">
         <div class="section-heading"><div><p class="eyebrow">03 / SATIŞ TAKİBİ</p><h2>Satış kaydı ekle</h2><p class="muted">Her satış ayrı kaydedilir. Kayıt anındaki birim maliyet saklandığı için geçmiş kâr hesabı sonradan değişmez.</p></div><span class="tag">Otomatik kaydetme</span></div>
+        <div class="sale-mode" role="tablist" aria-label="Satış türü">
+          <button type="button" class="sale-mode-btn active" role="tab" aria-selected="true" data-sale-mode="single">Tekli satış</button>
+          <button type="button" class="sale-mode-btn" role="tab" aria-selected="false" data-sale-mode="package" id="addPackageSale"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg>Paket Satış Ekle</button>
+        </div>
         <form id="saleForm" class="sales-form">
           <label class="field"><span>Satılan ürün</span><select id="saleProduct" required></select></label>
           <label class="field"><span>Adet</span><input id="saleQty" type="number" min="1" step="1" value="1" required></label>
@@ -153,11 +158,51 @@
           <label class="field sale-note-field"><span>Not (isteğe bağlı)</span><input id="saleNote" type="text" maxlength="120" placeholder="Örn. Instagram siparişi"></label>
           <button class="btn btn-primary sale-submit" type="submit"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Satışı kaydet</button>
         </form>
+        <form id="packageForm" class="sales-form package-form" hidden novalidate>
+          <label class="field"><span>Paket adı (isteğe bağlı)</span><input id="pkgName" type="text" maxlength="60" placeholder="Örn. Başlangıç seti"></label>
+          <label class="field"><span>Paket adedi</span><input id="pkgQty" type="number" min="1" step="1" value="1"></label>
+          <label class="field"><span>Paket satış fiyatı (TL / paket)</span><input id="pkgPrice" type="number" min="0" step="0.01" value="0"></label>
+          <label class="field"><span>Satış tarihi</span><input id="pkgDate" type="date"></label>
+          <label class="field sale-note-field"><span>Not (isteğe bağlı)</span><input id="pkgNote" type="text" maxlength="120" placeholder="Örn. Hediye paketi siparişi"></label>
+          <div class="pkg-items">
+            <div class="pkg-items-head"><strong>Paket içeriği</strong><span class="muted" id="pkgSuggest"></span></div>
+            <div class="pkg-item-rows" id="pkgItemRows"></div>
+            <div><button type="button" class="btn btn-ghost" id="pkgAddItem">＋ Ürün ekle</button></div>
+          </div>
+          <div class="pkg-summary-grid" id="pkgSummary" aria-live="polite"></div>
+          <button class="btn btn-primary sale-submit" type="submit"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Paket satışını kaydet</button>
+        </form>
         <div class="sales-stats">
           <article><span>Satış adedi</span><strong id="salesUnits">0</strong></article>
           <article><span>Toplam ciro</span><strong id="salesRevenue">₺0,00</strong></article>
           <article><span>Satılan ürün maliyeti</span><strong id="salesCost">₺0,00</strong></article>
           <article><span>Net kâr</span><strong id="salesProfit">₺0,00</strong></article>
+        </div>
+        <div class="sales-chart" id="salesChartCard">
+          <div class="sales-chart-head">
+            <div><h3>Satış grafiği</h3><p class="muted" id="salesChartCaption"></p></div>
+            <div class="chart-controls">
+              <div class="seg" role="group" aria-label="Grafik türü">
+                <button type="button" class="seg-btn active" data-chart-type="bar" aria-pressed="true">Çubuk</button>
+                <button type="button" class="seg-btn" data-chart-type="line" aria-pressed="false">Çizgi</button>
+              </div>
+              <div class="seg" role="group" aria-label="Zaman aralığı">
+                <button type="button" class="seg-btn active" data-chart-range="day" aria-pressed="true">Günlük</button>
+                <button type="button" class="seg-btn" data-chart-range="week" aria-pressed="false">Haftalık</button>
+                <button type="button" class="seg-btn" data-chart-range="month" aria-pressed="false">Aylık</button>
+              </div>
+            </div>
+          </div>
+          <div class="sales-chart-legend">
+            <button type="button" class="legend-item active" data-series="revenue" aria-pressed="true"><i></i>Ciro</button>
+            <button type="button" class="legend-item active" data-series="profit" aria-pressed="true"><i></i>Net kâr</button>
+          </div>
+          <div class="sales-chart-stage" id="salesChartStage">
+            <svg id="salesChartSvg" role="img" aria-label="Satış grafiği"></svg>
+            <div class="chart-hover-band" id="salesChartBand"></div>
+            <div class="chart-tip" id="salesChartTip" hidden></div>
+          </div>
+          <div id="salesChartEmpty" class="empty-state">Grafik için henüz satış kaydı yok. İlk satışını veya paket satışını eklediğinde burada görünecek.</div>
         </div>
         <div class="sales-toolbar">
           <div><label for="salesPeriod">Kayıt dönemi</label><select id="salesPeriod"><option value="week">Bu hafta</option><option value="month" selected>Bu ay</option><option value="all">Tüm kayıtlar</option></select></div>

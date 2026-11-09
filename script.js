@@ -25,6 +25,7 @@ function showPage(pageId) {
   // Sayfaya her girişte grafikler sıfırdan dolar.
   if (pageId === 'analysis' && typeof playCostChart === 'function') playCostChart(true);
   if (pageId === 'inventory' && typeof playPriceBars === 'function') playPriceBars(true);
+  if (pageId === 'sales' && typeof playSalesChart === 'function') playSalesChart(true);
 }
 document.querySelectorAll('.sidebar nav a[data-page]').forEach(link => {
   link.addEventListener('click', event => {
@@ -621,6 +622,7 @@ function renderProducts() {
   if ($('productDetailModal') && !$('productDetailModal').hidden) renderProductDetail();
 }
 function renderSaleProductOptions() {
+  if (typeof syncPackageProducts === 'function') syncPackageProducts();
   const select = $('saleProduct');
   if (!select) return;
   const previous = select.value;
@@ -845,7 +847,7 @@ function filteredSales() {
 function renderSales() {
   const {records,bounds} = filteredSales();
   $('salesRange').textContent = bounds.label;
-  const qty = records.reduce((sum,s)=>sum+(Number(s.qty)||0),0);
+  const qty = records.reduce((sum,s)=>sum+(Number(s.unitsTotal ?? s.qty)||0),0);   // paketlerde içerdeki ürün adetleri sayılır
   const revenue = records.reduce((sum,s)=>sum+(Number(s.revenue)||0),0);
   const cost = records.reduce((sum,s)=>sum+(Number(s.totalCost)||0),0);
   const profit = records.reduce((sum,s)=>sum+(Number(s.profit)||0),0);
@@ -856,10 +858,11 @@ function renderSales() {
   $('statProfit').textContent = money(allProfit);
   $('statProfitCaption').textContent = sales.length ? `Yapılan ${sales.length} satış kaydından` : 'Henüz satış kaydı yok';
   $('salesEmpty').style.display = records.length ? 'none' : 'block';
-  $('salesRows').innerHTML = records.map(s=>`<tr>
-    <td>${esc(s.date)}</td><td>${esc(s.productName)}</td><td>${fmt(s.qty,0)}</td><td>${money(s.unitPrice)}</td><td class="money">${money(s.revenue)}</td><td>${money(s.unitCost)}</td><td>${money(s.totalCost)}</td><td class="${s.profit>=0?'profit-positive':'profit-negative'}">${money(s.profit)}</td><td>${esc(s.note||'')}</td><td><button class="detail-btn" data-sale-detail="${esc(s.id)}" type="button">Fiyat detayı</button></td><td><button class="delete-btn" data-sale-delete="${esc(s.id)}" title="Satış kaydını sil" aria-label="Satış kaydını sil">×</button></td>
+  $('salesRows').innerHTML = records.map(s=>`<tr class="${s.type==='package'?'is-package':''}">
+    <td>${esc(s.date)}</td><td>${saleNameCell(s)}</td><td>${saleQtyCell(s)}</td><td>${money(s.unitPrice)}</td><td class="money">${money(s.revenue)}</td><td>${money(s.unitCost)}</td><td>${money(s.totalCost)}</td><td class="${s.profit>=0?'profit-positive':'profit-negative'}">${money(s.profit)}</td><td>${esc(s.note||'')}</td><td><button class="detail-btn" data-sale-detail="${esc(s.id)}" type="button">Fiyat detayı</button></td><td><button class="delete-btn" data-sale-delete="${esc(s.id)}" title="Satış kaydını sil" aria-label="Satış kaydını sil">×</button></td>
   </tr>`).join('');
   renderCostHistory();
+  renderSalesChart();
 }
 function snapshotForSale(product, x) {
   const c = calc(product, x);
@@ -933,6 +936,7 @@ function renderCostHistory() {
 function showSaleDetails(id) {
   const sale = sales.find(item=>String(item.id)===String(id));
   if (!sale) return;
+  if (sale.type === 'package') { showPackageDetails(sale); return; }
   const snap = sale.costSnapshot;
   const p = snap?.params || {};
   const b = snap?.breakdown || {};
@@ -957,7 +961,7 @@ function showSaleDetails(id) {
     <h3 class="detail-section-title">Satış anındaki değişken fiyatlar</h3>
     <div class="detail-grid">${paramItems.map(([label,value])=>`<div class="detail-item"><span>${esc(label)}</span><strong>${esc(String(value))}</strong></div>`).join('')}</div>
     <h3 class="detail-section-title">Ürün maliyetinin dökümü (birim başına)</h3>
-    <div class="detail-meta"><span>Baskı süresi<strong>${fmt(snap.product?.hours||0)} saat</strong></span></div>
+    <div class="detail-meta"><span>Baskı süresi<strong>${fmt(snap?.product?.hours||0)} saat</strong></span></div>
     <div class="table-wrap"><table class="detail-table"><thead><tr><th>Gider kalemi</th><th>Birim maliyet</th></tr></thead><tbody>${breakdownItems.map(([label,value])=>`<tr><td>${esc(label)}</td><td>${value===undefined?'Eski kayıtta yok':money(value)}</td></tr>`).join('')}<tr><td><strong>Toplam birim maliyet</strong></td><td><strong>${money(sale.unitCost)}</strong></td></tr></tbody></table></div>
     <div class="detail-total"><span>Satış fiyatı / adet<strong>${money(sale.unitPrice)}</strong></span><span>Satılan adet<strong>${fmt(sale.qty,0)}</strong></span><span>Toplam ciro<strong>${money(sale.revenue)}</strong></span><span>Toplam maliyet<strong>${money(sale.totalCost)}</strong></span><span>Bu satışın net kârı<strong>${money(sale.profit)}</strong></span></div>
     ${!snap?'<p class="note">Bu satış, fiyat geçmişi özelliği eklenmeden önce kaydedilmiş. Eski maliyet bileşenleri bu kayıtta saklı olmadığı için sadece birim maliyet, toplam maliyet ve kâr gösterilebilir. Yeni satışlarda tüm fiyatlar ayrı ayrı kaydedilir.</p>':''}`;
@@ -997,13 +1001,15 @@ function processPhotoFile(file, id) {
       canvas.width = Math.max(1,Math.round(img.width*scale));
       canvas.height = Math.max(1,Math.round(img.height*scale));
       canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+      // Düz renkli stüdyo arka planı algılanırsa şeffaflaştırılır (başarısızsa fotoğraf olduğu gibi kalır).
+      const bgResult = removeBackground(canvas);
       // PNG olarak kaydet: alfa kanalı korunur, şeffaf alanlar siyaha dönüşmez.
       const dataUrl = canvas.toDataURL('image/png');
       if (dataUrl.length > 1800000) { toast('Fotoğraf bulut kaydı için çok büyük. Daha küçük bir görsel seç.'); return; }
       product.photo = dataUrl;
       writeProductItem(id, {photo:dataUrl});
       renderProducts();
-      toast('Ürün fotoğrafı Firebase’e kaydedildi.');
+      toast(bgResult === 'done' ? 'Ürün fotoğrafı Firebase’e kaydedildi; arka plan şeffaflaştırıldı.' : 'Ürün fotoğrafı Firebase’e kaydedildi.');
     };
     img.onerror = () => toast('Fotoğraf okunamadı.');
     img.src = reader.result;
@@ -1216,6 +1222,7 @@ function renderProductDetail() {
   photoEl.innerHTML = product.photo
     ? `<button class="detail-photo-btn" type="button" data-detail-photo-open aria-label="Fotoğrafı büyüt" title="Büyütmek için tıkla"><img src="${product.photo}" alt="${esc(product.name||'Ürün')} fotoğrafı"><span class="detail-photo-hint">Büyüt ⤢</span></button>`
     : '<div class="detail-photo-empty">Fotoğraf yok</div>';
+  if (product.photo) photoEl.innerHTML += '<button class="photo-upload detail-photo-upload" type="button" data-detail-photo-transparent title="Düz renkli arka planı siler">Arka planı şeffaflaştır</button>';
   photoEl.innerHTML += '<label class="photo-upload detail-photo-upload">Fotoğraf seç<input type="file" accept="image/*" data-detail-photo-upload aria-label="Ürün fotoğrafı yükle"></label>';
 }
 function removeDetailColor(index) {
@@ -1259,6 +1266,7 @@ if ($('productDetailModal')) {
       if (product?.photo) openLightbox(product.id, photoButton);
       return;
     }
+    if (event.target.closest('[data-detail-photo-transparent]')) { makeProductPhotoTransparent(detailProductId); return; }
     const addButton = event.target.closest('[data-detail-add-color]');
     if (addButton) { addDetailColor(); return; }
     const deleteButton = event.target.closest('[data-color-delete]');
@@ -1485,7 +1493,7 @@ document.addEventListener('keydown', event => {
    Tercihler (tema, kenar çubuğu, oturum) tarayıcıda küçük anahtarlar olarak
    tutulur; iş verileri hâlâ yalnızca Firebase'dedir.
    ========================================================= */
-const THEMES = { dark:'#09090b', light:'#f4f5f7', midnight:'#050b1a', olive:'#0b0e08', carbon:'#070707', indigo:'#0d0f18' };
+const THEMES = { dark:'#09090b', light:'#f4f5f7', midnight:'#050b1a', glass:'#0b1030', olive:'#0b0e08', carbon:'#070707', indigo:'#0d0f18' };
 function prefGet(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
 function prefSet(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* gizli mod vb. */ } }
 function prefDel(key) { try { localStorage.removeItem(key); } catch (e) { /* yoksay */ } }
@@ -1692,7 +1700,597 @@ function initLoginForm() {
     }
   });
 }
-function initUi() { initThemeBar(); initSidebarToggle(); initLoginForm(); }
+function initUi() { initThemeBar(); initSidebarToggle(); initLoginForm(); initSalesChartUi(); initPackageUi(); }
+
+/* =========================================================
+ * ARKA PLAN ŞEFFAFLAŞTIRMA (ürün fotoğrafları)
+ * Kenarlardan başlayan renk benzerliği taramasıyla düz renkli stüdyo
+ * arka planını siler; kenarlar yumuşatılır, PNG alfa kanalıyla saklanır.
+ * Güvenlik: köşe renkleri tutarsızsa, görsel zaten şeffafsa veya silinen alan
+ * mantıksız (çok az / çok fazla) ise fotoğrafa dokunulmaz.
+ * Dönüş: 'done' | 'already' | 'skipped'
+ * ========================================================= */
+function removeBackground(canvas) {
+  const w = canvas.width, h = canvas.height;
+  if (w < 8 || h < 8) return 'skipped';
+  const ctx = canvas.getContext('2d');
+  let image;
+  try { image = ctx.getImageData(0, 0, w, h); } catch (e) { return 'skipped'; }
+  const d = image.data;
+  const at = (x, y) => (y * w + x) * 4;
+  // Zaten şeffaf mı? (kenar piksellerinin en az %8'i yarı saydamsa)
+  let borderTotal = 0, borderClear = 0;
+  const probe = (x, y) => { borderTotal++; if (d[at(x, y) + 3] < 200) borderClear++; };
+  for (let x = 0; x < w; x++) { probe(x, 0); probe(x, h - 1); }
+  for (let y = 1; y < h - 1; y++) { probe(0, y); probe(w - 1, y); }
+  if (borderClear / borderTotal >= 0.08) return 'already';
+  // Köşe örneklerinden arka plan rengi
+  const size = Math.max(2, Math.min(6, Math.floor(Math.min(w, h) / 20)));
+  const corner = (x0, y0) => {
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let y = y0; y < y0 + size; y++) for (let x = x0; x < x0 + size; x++) {
+      const i = at(x, y); r += d[i]; g += d[i + 1]; b += d[i + 2]; n++;
+    }
+    return [r / n, g / n, b / n];
+  };
+  const dist = (r, g, b, c) => Math.sqrt((r - c[0]) ** 2 + (g - c[1]) ** 2 + (b - c[2]) ** 2);
+  const corners = [corner(0, 0), corner(w - size, 0), corner(0, h - size), corner(w - size, h - size)];
+  for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) {
+    if (dist(corners[i][0], corners[i][1], corners[i][2], corners[j]) > 60) return 'skipped'; // karmaşık arka plan
+  }
+  const bg = [0, 1, 2].map(k => corners.reduce((sum, c) => sum + c[k], 0) / 4);
+  const TOL = 44, SOFT = 84;
+  const distAt = i => dist(d[i], d[i + 1], d[i + 2], bg);
+  const removed = new Uint8Array(w * h);
+  const stack = new Int32Array(w * h);
+  let sp = 0, removedCount = 0;
+  const seed = (x, y) => {
+    const p = y * w + x;
+    if (!removed[p] && distAt(p * 4) <= TOL) { removed[p] = 1; stack[sp++] = p; removedCount++; }
+  };
+  for (let x = 0; x < w; x++) { seed(x, 0); seed(x, h - 1); }
+  for (let y = 0; y < h; y++) { seed(0, y); seed(w - 1, y); }
+  while (sp) {
+    const p = stack[--sp], x = p % w, y = (p - x) / w;
+    if (x > 0) seed(x - 1, y);
+    if (x < w - 1) seed(x + 1, y);
+    if (y > 0) seed(x, y - 1);
+    if (y < h - 1) seed(x, y + 1);
+  }
+  const fraction = removedCount / (w * h);
+  if (fraction < 0.03 || fraction > 0.93) return 'skipped';
+  // Silinen alanı şeffaf yap; komşu kenar piksellerini yumuşat.
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const p = y * w + x, i = p * 4;
+    if (removed[p]) { d[i + 3] = 0; continue; }
+    let near = false;
+    for (let dy = -1; dy <= 1 && !near; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const nx = x + dx, ny = y + dy;
+      if (nx >= 0 && ny >= 0 && nx < w && ny < h && removed[ny * w + nx]) { near = true; break; }
+    }
+    if (near) {
+      const dd = distAt(i);
+      if (dd < SOFT) d[i + 3] = Math.round(255 * Math.min(1, Math.max(0.15, (dd - TOL) / (SOFT - TOL))));
+    }
+  }
+  ctx.putImageData(image, 0, 0);
+  return 'done';
+}
+// Kayıtlı bir fotoğrafın arka planını sonradan şeffaflaştırır (ürün detay penceresi).
+function makeProductPhotoTransparent(id) {
+  const product = productById(id);
+  if (!product || !product.photo) return;
+  if (!cloudReady) { toast('Bulut bağlantısı kurulmadan fotoğraf güncellenemez.'); return; }
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+    canvas.getContext('2d').drawImage(img, 0, 0);
+    const result = removeBackground(canvas);
+    if (result === 'already') { toast('Bu fotoğraf zaten şeffaf arka plana sahip.', 'info'); return; }
+    if (result !== 'done') { toast('Düz bir arka plan algılanamadı; fotoğraf değiştirilmedi.', 'warning'); return; }
+    const dataUrl = canvas.toDataURL('image/png');
+    if (dataUrl.length > 1800000) { toast('Fotoğraf bulut kaydı için çok büyük. Daha küçük bir görsel seç.'); return; }
+    product.photo = dataUrl;
+    writeProductItem(id, {photo: dataUrl});
+    renderProducts();
+    toast('Fotoğrafın arka planı şeffaflaştırıldı ve buluta kaydedildi.');
+  };
+  img.onerror = () => toast('Fotoğraf okunamadı.');
+  img.src = product.photo;
+}
+
+/* =========================================================
+ * SATIŞ GRAFİKLERİ — Çubuk / Çizgi · Günlük / Haftalık / Aylık
+ * Tüm satış kayıtları (tekli + paket) kullanılır. Veri veya filtre değişince
+ * değerler akıcı biçimde yeni duruma geçer; sayfaya her girişte sıfırdan büyür.
+ * ========================================================= */
+const SC = {
+  type:'bar', range:'day', hidden:new Set(),
+  buckets:[], from:null, to:null, cur:null, sig:'',
+  raf:0, animating:false, layout:null
+};
+const SC_RANGES = {
+  day:  {count:14, label:'Son 14 gün'},
+  week: {count:12, label:'Son 12 hafta'},
+  month:{count:12, label:'Son 12 ay'}
+};
+const clamp01 = v => Math.min(1, Math.max(0, v));
+const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+const compactMoney = new Intl.NumberFormat('tr-TR', {notation:'compact', maximumFractionDigits:1});
+
+function isoOf(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function weekStartOf(d) {
+  const s = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  s.setDate(s.getDate() - ((s.getDay() + 6) % 7));
+  return s;
+}
+function bucketKeyOf(d, range) {
+  if (range === 'day') return isoOf(d);
+  if (range === 'week') return isoOf(weekStartOf(d));
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+function buildSalesBuckets(range) {
+  const info = SC_RANGES[range];
+  const today = new Date(); today.setHours(0,0,0,0);
+  const list = [];
+  for (let i = info.count - 1; i >= 0; i--) {
+    let d, label, title;
+    if (range === 'day') {
+      d = new Date(today); d.setDate(d.getDate() - i);
+      label = d.toLocaleDateString('tr-TR', {day:'2-digit', month:'2-digit'});
+      title = d.toLocaleDateString('tr-TR', {day:'numeric', month:'long', year:'numeric', weekday:'long'});
+    } else if (range === 'week') {
+      d = weekStartOf(today); d.setDate(d.getDate() - i * 7);
+      const end = new Date(d); end.setDate(end.getDate() + 6);
+      label = d.toLocaleDateString('tr-TR', {day:'2-digit', month:'2-digit'});
+      title = `${dateLabel(d)} – ${dateLabel(end)}`;
+    } else {
+      d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      label = d.toLocaleDateString('tr-TR', {month:'short'});
+      title = d.toLocaleDateString('tr-TR', {month:'long', year:'numeric'});
+    }
+    list.push({key:bucketKeyOf(d, range), label, title, revenue:0, cost:0, profit:0, units:0, count:0});
+  }
+  const map = new Map(list.map(b => [b.key, b]));
+  sales.forEach(s => {
+    const date = localDate(s.date);
+    if (!date) return;
+    const bucket = map.get(bucketKeyOf(date, range));
+    if (!bucket) return;
+    bucket.revenue += Number(s.revenue) || 0;
+    bucket.cost += Number(s.totalCost) || 0;
+    bucket.profit += Number(s.profit) || 0;
+    bucket.units += Number(s.unitsTotal ?? s.qty) || 0;
+    bucket.count += 1;
+  });
+  return list;
+}
+function niceNum(range, round) {
+  const exp = Math.floor(Math.log10(range)), f = range / Math.pow(10, exp);
+  const nf = round ? (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) : (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10);
+  return nf * Math.pow(10, exp);
+}
+function niceDomain(min, max, count) {
+  min = Math.min(0, min); max = Math.max(0, max);
+  if (max - min <= 0) return {min:0, max:100, ticks:[0, 25, 50, 75, 100]};
+  const step = niceNum((max - min) / count, true);
+  const lo = Math.floor(min / step) * step, hi = Math.ceil(max / step) * step;
+  const ticks = [];
+  for (let v = lo; v <= hi + step / 2; v += step) ticks.push(Math.round(v * 1e6) / 1e6);
+  return {min:lo, max:hi, ticks};
+}
+// Fritsch–Carlson tekdüze kübik eğri: değerlerin dışına taşmayan yumuşak çizgi.
+function monotonePath(p) {
+  const n = p.length;
+  if (!n) return '';
+  if (n === 1) return `M${p[0][0]},${p[0][1]}`;
+  const dx = [], m = [];
+  for (let i = 0; i < n - 1; i++) { dx[i] = p[i+1][0] - p[i][0]; m[i] = (p[i+1][1] - p[i][1]) / dx[i]; }
+  const t = [m[0]];
+  for (let i = 1; i < n - 1; i++) t[i] = m[i-1] * m[i] <= 0 ? 0 : (m[i-1] + m[i]) / 2;
+  t[n-1] = m[n-2];
+  for (let i = 0; i < n - 1; i++) {
+    if (m[i] === 0) { t[i] = 0; t[i+1] = 0; continue; }
+    const a = t[i] / m[i], b = t[i+1] / m[i], s = a * a + b * b;
+    if (s > 9) { const k = 3 / Math.sqrt(s); t[i] = k * a * m[i]; t[i+1] = k * b * m[i]; }
+  }
+  let d = `M${p[0][0].toFixed(1)},${p[0][1].toFixed(1)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const h = dx[i] / 3;
+    d += ` C${(p[i][0]+h).toFixed(1)},${(p[i][1]+t[i]*h).toFixed(1)} ${(p[i+1][0]-h).toFixed(1)},${(p[i+1][1]-t[i+1]*h).toFixed(1)} ${p[i+1][0].toFixed(1)},${p[i+1][1].toFixed(1)}`;
+  }
+  return d;
+}
+function computeSalesTarget() {
+  SC.buckets = buildSalesBuckets(SC.range);
+  const rev = SC.buckets.map(b => b.revenue), prof = SC.buckets.map(b => b.profit);
+  const visible = [0];
+  if (!SC.hidden.has('revenue')) visible.push(...rev);
+  if (!SC.hidden.has('profit')) visible.push(...prof);
+  const dom = niceDomain(Math.min(...visible), Math.max(...visible), 4);
+  SC.to = {rev, prof, dom:[dom.min, dom.max], ticks:dom.ticks};
+}
+function drawSalesChart(t) {
+  const stage = $('salesChartStage'), svg = $('salesChartSvg');
+  if (!stage || !svg || !SC.to || !SC.from) return;
+  const W = stage.clientWidth, H = stage.clientHeight;
+  if (W < 60 || H < 60) return;                      // sayfa gizliyken çizme
+  const n = SC.to.rev.length, STAGGER = 0.55;
+  const prog = i => easeOutCubic(clamp01(t * (1 + STAGGER) - (n > 1 ? i / (n - 1) : 0) * STAGGER));
+  const e = easeOutCubic(t);
+  const dom = [0, 1].map(k => SC.from.dom[k] + (SC.to.dom[k] - SC.from.dom[k]) * e);
+  const blend = (a, b) => b.map((v, i) => a[i] + (v - a[i]) * prog(i));
+  const rev = blend(SC.from.rev, SC.to.rev), prof = blend(SC.from.prof, SC.to.prof);
+  SC.cur = {rev, prof, dom};
+  const m = {l:58, r:14, t:14, b:32};
+  const pw = W - m.l - m.r, ph = H - m.t - m.b, band = pw / n;
+  const y = v => m.t + ph - ((v - dom[0]) / ((dom[1] - dom[0]) || 1)) * ph;
+  const y0 = y(0);
+  SC.layout = {W, H, m, pw, ph, n, band};
+  const series = [
+    {key:'revenue', vals:rev, color:'var(--sky)'},
+    {key:'profit',  vals:prof, color:'var(--emerald)'}
+  ].filter(s => !SC.hidden.has(s.key));
+
+  let out = '<defs>' + series.map(s => `<linearGradient id="scg-${s.key}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:${s.color};stop-opacity:.32"/><stop offset="1" style="stop-color:${s.color};stop-opacity:0"/></linearGradient>`).join('') + '</defs>';
+  // Izgara + y ekseni
+  SC.to.ticks.forEach(tick => {
+    const ty = y(tick);
+    if (ty < m.t - 1 || ty > m.t + ph + 1) return;
+    out += `<line x1="${m.l}" x2="${W - m.r}" y1="${ty.toFixed(1)}" y2="${ty.toFixed(1)}" class="sc-grid${tick === 0 ? ' sc-zero' : ''}"/>`;
+    out += `<text x="${m.l - 8}" y="${(ty + 3.5).toFixed(1)}" text-anchor="end" class="sc-axis">${esc(compactMoney.format(tick))}</text>`;
+  });
+  // x ekseni etiketleri (en sağdaki her zaman görünür)
+  const step = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(pw / 46))));
+  SC.buckets.forEach((b, i) => {
+    if ((n - 1 - i) % step) return;
+    out += `<text x="${(m.l + band * (i + .5)).toFixed(1)}" y="${H - 10}" text-anchor="middle" class="sc-axis">${esc(b.label)}</text>`;
+  });
+  if (SC.type === 'bar') {
+    const count = series.length || 1, gap = 3;
+    const groupW = Math.min(band * .74, count * 34), bw = (groupW - (count - 1) * gap) / count;
+    series.forEach((s, si) => s.vals.forEach((v, i) => {
+      const cx = m.l + band * (i + .5), bx = cx - groupW / 2 + si * (bw + gap);
+      const yy = y(v), top = Math.min(yy, y0), hh = Math.abs(yy - y0);
+      if (hh < .5) return;
+      const fill = s.key === 'profit' && v < 0 ? 'var(--rose)' : s.color;
+      out += `<rect x="${bx.toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" rx="${Math.min(4, bw / 2).toFixed(1)}" style="fill:${fill}" opacity=".92"/>`;
+    }));
+  } else {
+    series.forEach(s => {
+      const pts = s.vals.map((v, i) => [m.l + band * (i + .5), y(v)]);
+      const d = monotonePath(pts);
+      if (pts.length > 1) out += `<path d="${d} L${pts[n-1][0].toFixed(1)},${y0.toFixed(1)} L${pts[0][0].toFixed(1)},${y0.toFixed(1)} Z" style="fill:url(#scg-${s.key})" stroke="none"/>`;
+      out += `<path d="${d}" fill="none" style="stroke:${s.color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>`;
+      pts.forEach(p => { out += `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.6" style="fill:${s.color};stroke:var(--bg-soft)" stroke-width="1.6"/>`; });
+    });
+  }
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = out;
+}
+function retargetSalesChart(mode, animate) {
+  const n = SC.to.rev.length, zeros = () => new Array(n).fill(0);
+  cancelAnimationFrame(SC.raf);
+  SC.animating = false;
+  if (mode === 'tween' && SC.cur && SC.cur.rev.length === n) {
+    SC.from = {rev:[...SC.cur.rev], prof:[...SC.cur.prof], dom:[...SC.cur.dom]};
+  } else {
+    SC.from = {rev:zeros(), prof:zeros(), dom:[...SC.to.dom]};   // sıfırdan büyür
+  }
+  if (!animate || prefersReducedMotion()) { drawSalesChart(1); return; }
+  const started = performance.now(), duration = mode === 'zero' ? 900 : 650;
+  SC.animating = true;
+  drawSalesChart(0);
+  const step = now => {
+    const t = Math.min(1, (now - started) / duration);
+    drawSalesChart(t);
+    if (t < 1) SC.raf = requestAnimationFrame(step); else SC.animating = false;
+  };
+  SC.raf = requestAnimationFrame(step);
+}
+function salesChartSignature() {
+  const r = v => Math.round(v * 100);
+  return JSON.stringify([SC.range, SC.type, [...SC.hidden].sort(), SC.to.rev.map(r), SC.to.prof.map(r)]);
+}
+function syncSalesChartControls() {
+  document.querySelectorAll('[data-chart-type]').forEach(b => {
+    const on = b.dataset.chartType === SC.type;
+    b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on));
+  });
+  document.querySelectorAll('[data-chart-range]').forEach(b => {
+    const on = b.dataset.chartRange === SC.range;
+    b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on));
+  });
+  document.querySelectorAll('[data-series]').forEach(b => {
+    const on = !SC.hidden.has(b.dataset.series);
+    b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on));
+  });
+}
+// forceMode: 'zero' (sıfırdan büyür) | 'tween' (mevcut değerlerden akıcı geçiş) | undefined (veri değişince)
+function renderSalesChart(forceMode) {
+  if (!$('salesChartCard')) return;
+  computeSalesTarget();
+  const totalRev = SC.to.rev.reduce((a, b) => a + b, 0), totalProf = SC.to.prof.reduce((a, b) => a + b, 0);
+  $('salesChartCaption').textContent = `${SC_RANGES[SC.range].label} · Ciro ${money(totalRev)} · Net kâr ${money(totalProf)}`;
+  $('salesChartSvg').setAttribute('aria-label', `Satış grafiği: ${SC_RANGES[SC.range].label}, toplam ciro ${money(totalRev)}, net kâr ${money(totalProf)}`);
+  const has = sales.length > 0;
+  $('salesChartEmpty').style.display = has ? 'none' : 'block';
+  $('salesChartStage').style.display = has ? '' : 'none';
+  syncSalesChartControls();
+  const sig = salesChartSignature();
+  if (!forceMode && sig === SC.sig) return;          // aynı veri: yeniden animasyon yok
+  const first = !SC.sig;
+  SC.sig = sig;
+  if (!has) return;
+  retargetSalesChart(forceMode || (first ? 'zero' : 'tween'), isPageActive('sales'));
+}
+// Satış sayfasına her girişte grafik sıfırdan dolar.
+function playSalesChart(animate) {
+  if (!$('salesChartCard')) return;
+  computeSalesTarget();
+  SC.sig = salesChartSignature();
+  if (!sales.length) return;
+  retargetSalesChart('zero', animate);
+}
+function initSalesChartUi() {
+  const card = $('salesChartCard'), stage = $('salesChartStage');
+  if (!card || !stage) return;
+  card.addEventListener('click', event => {
+    const typeBtn = event.target.closest('[data-chart-type]');
+    if (typeBtn) { SC.type = typeBtn.dataset.chartType; renderSalesChart('zero'); return; }
+    const rangeBtn = event.target.closest('[data-chart-range]');
+    if (rangeBtn) { SC.range = rangeBtn.dataset.chartRange; renderSalesChart('zero'); return; }
+    const seriesBtn = event.target.closest('[data-series]');
+    if (seriesBtn) {
+      const key = seriesBtn.dataset.series;
+      if (SC.hidden.has(key)) SC.hidden.delete(key);
+      else if (SC.hidden.size < 1) SC.hidden.add(key);   // en az bir seri görünür kalır
+      renderSalesChart('tween');
+    }
+  });
+  const tip = $('salesChartTip'), band = $('salesChartBand');
+  const hide = () => { tip.hidden = true; band.style.opacity = '0'; };
+  const show = event => {
+    const L = SC.layout;
+    if (!L || !SC.buckets.length) return;
+    const rect = stage.getBoundingClientRect();
+    const i = Math.floor((event.clientX - rect.left - L.m.l) / L.band);
+    if (i < 0 || i >= L.n) { hide(); return; }
+    const b = SC.buckets[i];
+    band.style.left = `${L.m.l + L.band * i}px`; band.style.width = `${L.band}px`; band.style.opacity = '1';
+    tip.innerHTML = `<strong>${esc(b.title)}</strong>
+      <div><i style="background:var(--sky)"></i>Ciro<b>${money(b.revenue)}</b></div>
+      <div><i style="background:var(--rose)"></i>Maliyet<b>${money(b.cost)}</b></div>
+      <div><i style="background:var(--emerald)"></i>Net kâr<b class="${b.profit >= 0 ? 'profit-positive' : 'profit-negative'}">${money(b.profit)}</b></div>
+      <small>${fmt(b.count, 0)} kayıt · ${fmt(b.units, 0)} adet</small>`;
+    tip.hidden = false;
+    const half = tip.offsetWidth / 2;
+    const center = Math.min(L.W - half - 4, Math.max(half + 4, L.m.l + L.band * (i + .5)));
+    tip.style.left = `${center}px`;
+  };
+  stage.addEventListener('pointermove', show);
+  stage.addEventListener('pointerdown', show);
+  stage.addEventListener('pointerleave', hide);
+  if ('ResizeObserver' in window) {
+    new ResizeObserver(() => { if (!SC.animating && SC.to && SC.from) drawSalesChart(1); }).observe(stage);
+  }
+  syncSalesChartControls();
+}
+
+/* =========================================================
+ * PAKET SATIŞ — çoklu ürün paketi, otomatik maliyet ve net kâr
+ * Paket, normal satış kaydıyla aynı alanları taşır (revenue, totalCost, profit);
+ * bu yüzden ciro ve kâr toplamlarına, grafiklere ve ana sayfa kartına kendiliğinden
+ * dahil olur. type:'package' alanı listede "Paket" etiketi gösterir.
+ * ========================================================= */
+const PKG = { items:[{productId:'', qty:1}], sig:null };
+function packageItemsOf(sale) {
+  const value = sale?.items;
+  const list = Array.isArray(value) ? value : (value && typeof value === 'object' ? Object.values(value) : []);
+  return list.map(item => ({
+    productId: String(item?.productId ?? ''), name: String(item?.name ?? 'Ürün'),
+    qty: Math.max(0, Number(item?.qty) || 0), unitCost: Number(item?.unitCost) || 0, lineCost: Number(item?.lineCost) || 0
+  }));
+}
+function pkgCompute() {
+  const x = params();
+  const lines = PKG.items.map(item => {
+    const p = productById(item.productId);
+    const qty = Math.max(0, Math.floor(Number(item.qty) || 0));
+    const unitCost = p ? calc(p, x).unit : 0;
+    const unitSale = p ? Math.max(0, Number(p.sale) || 0) : 0;
+    return {item, p, qty, unitCost, lineCost: unitCost * qty, lineSale: unitSale * qty};
+  });
+  const cost = lines.reduce((sum, l) => sum + l.lineCost, 0);
+  const listPrice = lines.reduce((sum, l) => sum + l.lineSale, 0);
+  const price = num('pkgPrice');
+  const pq = Math.max(1, Math.floor(num('pkgQty')));
+  return {
+    lines, cost, listPrice, price, pq, profit: price - cost, margin: price > 0 ? (price - cost) / price * 100 : 0,
+    revenue: price * pq, totalCost: cost * pq, totalProfit: (price - cost) * pq
+  };
+}
+function renderPackageRows() {
+  const wrap = $('pkgItemRows');
+  if (!wrap) return;
+  const options = state.products.length
+    ? '<option value="">Ürün seç…</option>' + state.products.map(p => `<option value="${esc(p.id)}">${esc(p.name || 'İsimsiz ürün')}</option>`).join('')
+    : '<option value="">Önce ürün ekle</option>';
+  wrap.innerHTML = PKG.items.map((item, i) => `<div class="pkg-item-row" data-pkg-row="${i}">
+    <select data-pkg-field="productId" aria-label="Pakete dahil ürün">${options}</select>
+    <input type="number" min="1" step="1" value="${Number(item.qty) || 0}" data-pkg-field="qty" aria-label="Ürün adedi">
+    <span class="pkg-line-cost" data-pkg-cost="${i}">—</span>
+    <button class="delete-btn" type="button" data-pkg-remove="${i}" title="Satırı kaldır" aria-label="Satırı kaldır">×</button>
+  </div>`).join('');
+  wrap.querySelectorAll('select').forEach((select, i) => {
+    select.value = PKG.items[i].productId || '';
+    if (select.value !== (PKG.items[i].productId || '')) { PKG.items[i].productId = ''; select.value = ''; }
+  });
+  updatePackageSummary();
+}
+function updatePackageSummary() {
+  const box = $('pkgSummary');
+  if (!box) return;
+  const c = pkgCompute();
+  document.querySelectorAll('[data-pkg-cost]').forEach(el => {
+    const l = c.lines[Number(el.dataset.pkgCost)];
+    el.textContent = l && l.p && l.qty > 0 ? `${money(l.unitCost)} × ${fmt(l.qty, 0)} = ${money(l.lineCost)}` : '—';
+  });
+  const valid = c.lines.filter(l => l.p && l.qty > 0);
+  const unitCount = valid.reduce((sum, l) => sum + l.qty, 0);
+  const good = c.profit >= 0;
+  box.innerHTML = `
+    <article><span>Paket maliyeti</span><strong>${money(c.cost)}</strong><small>${fmt(valid.length, 0)} kalem · ${fmt(unitCount, 0)} ürün</small></article>
+    <article><span>Paket satış fiyatı</span><strong>${money(c.price)}</strong><small>1 paket için</small></article>
+    <article class="${good ? 'is-profit' : 'is-loss'}"><span>Net kâr / paket</span><strong class="${good ? 'profit-positive' : 'profit-negative'}">${money(c.profit)}</strong><small>Kâr marjı %${fmt(c.margin, 1)}</small></article>
+    <article><span>Toplam (${fmt(c.pq, 0)} paket)</span><strong class="${c.totalProfit >= 0 ? 'profit-positive' : 'profit-negative'}">${money(c.totalProfit)}</strong><small>Ciro ${money(c.revenue)} · maliyet ${money(c.totalCost)}</small></article>`;
+  const suggest = $('pkgSuggest');
+  if (suggest) suggest.innerHTML = c.listPrice > 0
+    ? `Ürünlerin tekil satış fiyatları toplamı: <strong>${money(c.listPrice)}</strong> <button type="button" class="link-btn" data-pkg-apply-list>Paket fiyatı olarak kullan</button>`
+    : '';
+}
+// Ürün listesi değişince (ekleme, silme, yeniden adlandırma) satırları yeniler; aksi halde yalnızca özeti.
+function syncPackageProducts() {
+  if (!$('pkgItemRows')) return;
+  const sig = state.products.map(p => `${p.id}:${p.name || ''}`).join('|');
+  if (sig !== PKG.sig) {
+    PKG.sig = sig;
+    PKG.items.forEach(item => { if (item.productId && !productById(item.productId)) item.productId = ''; });
+    renderPackageRows();
+  } else {
+    updatePackageSummary();
+  }
+}
+function setSaleMode(mode) {
+  const pkgOn = mode === 'package';
+  $('saleForm').hidden = pkgOn;
+  $('packageForm').hidden = !pkgOn;
+  document.querySelectorAll('[data-sale-mode]').forEach(btn => {
+    const on = btn.dataset.saleMode === mode;
+    btn.classList.toggle('active', on); btn.setAttribute('aria-selected', String(on));
+  });
+  if (pkgOn) syncPackageProducts();
+}
+function savePackageSale(event) {
+  event.preventDefault();
+  if (!cloudReady) { toast('Bulut bağlantısı kurulmadan satış kaydedilemez.'); return; }
+  const c = pkgCompute();
+  if (!c.lines.length || c.lines.some(l => !l.p || l.qty < 1)) {
+    toast('Her satır için bir ürün seç ve adedi en az 1 gir.', 'warning'); return;
+  }
+  if (!(c.price > 0)) { toast('Paket satış fiyatını gir.', 'warning'); return; }
+  // Aynı ürün birden fazla satırdaysa tek kalemde birleştirilir.
+  const merged = new Map();
+  c.lines.forEach(l => {
+    const prev = merged.get(l.p.id);
+    if (prev) { prev.qty += l.qty; prev.lineCost += l.lineCost; }
+    else merged.set(l.p.id, {p: l.p, qty: l.qty, unitCost: l.unitCost, lineCost: l.lineCost});
+  });
+  const x = params();
+  const lines = [...merged.values()];
+  const items = lines.map(l => ({
+    productId: l.p.id, name: l.p.name || 'İsimsiz ürün', qty: l.qty,
+    unitCost: l.unitCost, lineCost: l.lineCost, unitListPrice: Math.max(0, Number(l.p.sale) || 0)
+  }));
+  const perPackageUnits = items.reduce((sum, i) => sum + i.qty, 0);
+  const typedName = $('pkgName').value.trim();
+  const record = {
+    type: 'package',
+    date: $('pkgDate').value || todayISO(),
+    productName: typedName || items.map(i => `${i.name} ×${i.qty}`).join(' + '),
+    items,
+    qty: c.pq, unitsTotal: perPackageUnits * c.pq,
+    unitPrice: c.price, unitCost: c.cost,
+    revenue: c.revenue, totalCost: c.totalCost, profit: c.totalProfit,
+    note: $('pkgNote').value.trim(), createdAt: Date.now(),
+    costSnapshot: {
+      params: clone(x),
+      items: lines.map(l => {
+        const b = calc(l.p, x);
+        return {
+          productId: l.p.id, name: l.p.name || 'İsimsiz ürün', qty: l.qty, hours: Number(l.p.hours) || 0,
+          breakdown: {filament:b.filament, electric:b.electric, stand:b.stand, machine:b.machine, wear:b.wear, fire:b.fire, lighter:b.lighter, unit:b.unit}
+        };
+      }),
+      capturedAt: new Date().toISOString()
+    }
+  };
+  salesRef.push(record)
+    .then(() => {
+      PKG.items = [{productId:'', qty:1}];
+      $('pkgName').value = ''; $('pkgNote').value = ''; $('pkgQty').value = 1; $('pkgPrice').value = 0;
+      $('pkgDate').value = todayISO();
+      renderPackageRows();
+      toast(`Paket satışı buluta kaydedildi. Net kâr: ${money(record.profit)}`);
+    })
+    .catch(error => cloudError(error, 'paket satışı kaydetme'));
+}
+function saleNameCell(sale) {
+  if (sale.type !== 'package') return esc(sale.productName);
+  const contents = packageItemsOf(sale).map(i => `${esc(i.name)} ×${fmt(i.qty, 0)}`).join(' + ');
+  return `<span class="sale-badge package">Paket</span>${esc(sale.productName)}${contents ? `<small class="pkg-contents">${contents}</small>` : ''}`;
+}
+function saleQtyCell(sale) {
+  return sale.type === 'package' ? `${fmt(sale.qty, 0)} paket` : fmt(sale.qty, 0);
+}
+function showPackageDetails(sale) {
+  const items = packageItemsOf(sale);
+  const perPackageUnits = items.reduce((sum, i) => sum + i.qty, 0);
+  $('saleDetailTitle').textContent = `${sale.productName} — paket satışı`;
+  $('saleDetailSubtitle').textContent = `Satış tarihi: ${sale.date} · Birim maliyetler satış anındaki değerlerle saklanır; bugünkü fiyatlarla yeniden hesaplanmaz.`;
+  $('saleDetailContent').innerHTML = `
+    <h3 class="detail-section-title">Paket içeriği ve maliyeti (1 paket için)</h3>
+    <div class="table-wrap"><table class="detail-table"><thead><tr><th>Ürün</th><th>Adet</th><th>Birim maliyet</th><th>Kalem maliyeti</th></tr></thead><tbody>
+      ${items.map(i => `<tr><td>${esc(i.name)}</td><td>${fmt(i.qty, 0)}</td><td>${money(i.unitCost)}</td><td>${money(i.lineCost)}</td></tr>`).join('')}
+      <tr><td><strong>Paket maliyeti</strong></td><td><strong>${fmt(perPackageUnits, 0)}</strong></td><td></td><td><strong>${money(sale.unitCost)}</strong></td></tr>
+    </tbody></table></div>
+    <div class="detail-total"><span>Paket satış fiyatı<strong>${money(sale.unitPrice)}</strong></span><span>Paket adedi<strong>${fmt(sale.qty, 0)}</strong></span><span>Toplam ciro<strong>${money(sale.revenue)}</strong></span><span>Toplam maliyet<strong>${money(sale.totalCost)}</strong></span><span>Bu satışın net kârı<strong>${money(sale.profit)}</strong></span></div>`;
+  $('saleDetailModal').hidden = false;
+}
+function initPackageUi() {
+  const form = $('packageForm');
+  if (!form) return;
+  document.querySelectorAll('[data-sale-mode]').forEach(btn => btn.addEventListener('click', () => setSaleMode(btn.dataset.saleMode)));
+  form.addEventListener('input', event => {
+    const el = event.target;
+    if (el.matches('[data-pkg-field="qty"]')) {
+      const row = el.closest('[data-pkg-row]');
+      if (row && PKG.items[Number(row.dataset.pkgRow)]) PKG.items[Number(row.dataset.pkgRow)].qty = Math.max(0, Number(el.value) || 0);
+    }
+    if (el.matches('[data-pkg-field="qty"], #pkgPrice, #pkgQty')) updatePackageSummary();
+  });
+  form.addEventListener('change', event => {
+    const el = event.target;
+    if (el.matches('[data-pkg-field="productId"]')) {
+      const row = el.closest('[data-pkg-row]');
+      if (row && PKG.items[Number(row.dataset.pkgRow)]) PKG.items[Number(row.dataset.pkgRow)].productId = el.value;
+      updatePackageSummary();
+    }
+  });
+  form.addEventListener('click', event => {
+    if (event.target.closest('#pkgAddItem')) {
+      PKG.items.push({productId:'', qty:1});
+      renderPackageRows();
+      const selects = $('pkgItemRows').querySelectorAll('select');
+      if (selects.length) selects[selects.length - 1].focus();
+      return;
+    }
+    const removeBtn = event.target.closest('[data-pkg-remove]');
+    if (removeBtn) {
+      PKG.items.splice(Number(removeBtn.dataset.pkgRemove), 1);
+      if (!PKG.items.length) PKG.items.push({productId:'', qty:1});
+      renderPackageRows();
+      return;
+    }
+    if (event.target.closest('[data-pkg-apply-list]')) {
+      $('pkgPrice').value = Math.round(pkgCompute().listPrice * 100) / 100;
+      updatePackageSummary();
+    }
+  });
+  form.addEventListener('submit', savePackageSale);
+  $('pkgDate').value = todayISO();
+}
 
 /* ---------- Başlangıç ---------- */
 syncInputs();
