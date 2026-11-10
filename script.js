@@ -47,6 +47,8 @@ const clone = value => JSON.parse(JSON.stringify(value));
 let state = {...clone(defaults), products: []};
 let sales = [];
 let costHistory = [];
+// Üretim kayıtları (printcost/productionLogs). Satıştan bağımsız üretim hareketleri.
+let productionLogs = [];
 // Renk adı → depodaki kilogram. Ayrı bir bulut düğümünde (printcost/filamentStock) tutulur.
 let filamentStock = {};
 let filamentStockLoaded = false;
@@ -66,6 +68,7 @@ let historyRef = null;
 let filamentStockRef = null;
 let maintenanceFundRef = null;
 let maintenanceLogsRef = null;
+let productionLogsRef = null;
 let presenceRef = null;
 // Bakım & gider fonu (printcost/maintenanceFund) ve gerçek masraf kayıtları.
 let maintenanceFund = {balance:0, totalAccrued:0, totalSpent:0, updatedAt:0};
@@ -119,6 +122,7 @@ function initFirebase() {
     filamentStockRef = rootRef.child('filamentStock');
     maintenanceFundRef = rootRef.child('maintenanceFund');
     maintenanceLogsRef = rootRef.child('maintenanceLogs');
+    productionLogsRef = rootRef.child('productionLogs');
     presenceRef = rootRef.child('system/presence');
     cloudReady = true;
     const banner = $('cloudBanner');
@@ -235,6 +239,15 @@ function attachCloudListeners() {
       .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
     renderMaintenance();
   }, error => cloudError(error, 'bakım masraflarını okuma'));
+
+  // Üretim kayıtları: hangi üründen kaç adet üretildiği ve tüketilen renk gramları.
+  if (productionLogsRef) productionLogsRef.on('value', snap => {
+    const value = snap.val() || {};
+    productionLogs = Object.entries(value)
+      .map(([id, log]) => ({id, ...log}))
+      .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+    if ($('productDetailModal') && !$('productDetailModal').hidden) renderProductDetail();
+  }, error => cloudError(error, 'üretim kayıtlarını okuma'));
 
   // onDisconnect: sekme kapanınca/bağlantı kopunca oturum "offline" işaretlenir.
   // Bu düğüm yalnızca bağlantı sağlığı göstergesidir; stok/satış verisini etkilemez.
@@ -417,79 +430,56 @@ document.addEventListener('focusout', event => {
 document.addEventListener('input', event => {
   if (event.target?.matches?.('input[type="number"]')) validateNumericElement(event.target,{silent:true});
 });
-function requiredStockForProduct(product, qty) {
-  const waste = 1 + Math.min(90, Math.max(0, params().wasteRate))/100;
-  const colors = productColors(product);
-  if (colors.length) return colors.filter(c=>c.grams>0).map(c=>({color:c.name,kg:c.grams*qty*waste/1000}));
-  const grams = unitGrams(product);
-  return grams > 0 ? [{color:null,kg:grams*qty*waste/1000}] : [];
+/* =========================================================
+ * MAMUL STOK & ÜRETİM MİMARİSİ
+ * - Satışlar yalnızca products/{id}/readyStock (hazır mamul adedi) düşer.
+ * - Hammadde (renk bazlı filament) yalnızca "Üret" akışında tüketilir.
+ * - Üretim: filament kontrolü → renk gramlarını düş → mamul stoğu artır → log yaz.
+ * ========================================================= */
+function readyStockOf(product) {
+  return Math.max(0, Math.floor(Number(product?.readyStock) || 0));
 }
-function stockGuardMessage() { return 'Yetersiz Stok / Tedarik Gerekli'; }
+function stockGuardMessage() { return 'Yetersiz mamul stok / önce üretim yap'; }
 const TX_MAX_ATTEMPTS = 3;
 function txRetryDelay(attempt) { return 400 * Math.pow(2, attempt) + Math.floor(Math.random() * 250); }
 function txShouldRetry(error) { return !/PERMISSION_DENIED/i.test(String(error?.code || error?.message || '')); }
 
 /**
- * Satışı + stok düşümünü + bakım fonu tahakkukunu tek atomik transaction'da birleştirir.
- * - Üstel geri çekilmeli en fazla 3 deneme (ağ hatası / eşzamanlı çakışma).
- * - Aynı saleRef anahtarı yeniden denenirse satış zaten yazılmışsa çift kayıt oluşmaz.
- * - Başarısızlıkta Firebase transaction'ı hiçbir alanı yazmaz (atomik roll-back).
+ * Satışı + mamul stok düşümünü + bakım fonu tahakkukunu tek atomik transaction'da birleştirir.
+ * requirements: [{productId, name, qty}] — satılan mamul adetleri.
+ * Hammadde filament stoğuna bu fonksiyon dokunmaz; o yalnızca handleProduction'da düşer.
  */
-function commitSaleWithStock(record, requirements, maintenanceShare = 0) {
+function commitSaleWithFinishedStock(record, requirements, maintenanceShare = 0) {
   if (!cloudReady || !rootRef) return Promise.reject(new Error('Bulut bağlantısı kurulmadan satış kaydedilemez.'));
   if (!firebaseConnected || navigator.onLine === false) {
-    toast('Bağlantı yok. Stok doğrulamalı satış, stok güvenliği için bağlantı gelene kadar engellendi.', 'warning');
+    toast('Bağlantı yok. Mamul stok doğrulamalı satış, stok güvenliği için bağlantı gelene kadar engellendi.', 'warning');
     return Promise.reject(new Error('offline-stock-guard'));
   }
   const saleRef = salesRef.push();
   const share = Math.max(0, Number(maintenanceShare) || 0);
-  const fallbackPrice = params().filamentPrice;
+  let shortages = [];
 
   const runAttempt = attempt => new Promise((resolve, reject) => {
     let shortage = false, duplicate = false;
+    shortages = [];
     rootRef.transaction(current => {
-      shortage = false; duplicate = false;
+      shortage = false; duplicate = false; shortages = [];
       const root = current || {};
       // Ağ hatası sonrası yeniden denemede satış zaten yazıldıysa çift kayıt engellenir.
       if (root.sales && root.sales[saleRef.key]) { duplicate = true; return; }
-      const stock = {...(root.filamentStock || {})};
+      const products = {...(root.products || {})};
       for (const req of requirements) {
-        if (req.color) {
-          const raw = stock[req.color];
-          const entry = normalizeStockEntry(raw);
-          if (entry.kg + 1e-9 < req.kg) { shortage = true; return; }
-          const remainingGrams = Math.max(0, entry.totalWeightGrams - req.kg * 1000);
-          stock[req.color] = {
-            ...(raw && typeof raw === 'object' ? raw : {}),
-            kg: round3(remainingGrams / 1000),
-            totalWeightGrams: Math.round(remainingGrams),
-            weightedAveragePricePerKg: entry.weightedAveragePricePerKg ?? fallbackPrice,
-            updatedAt: Date.now()
-          };
-        } else {
-          let remaining = req.kg;
-          const keys = Object.keys(stock).sort((a,b)=>normalizeStockEntry(stock[b]).kg-normalizeStockEntry(stock[a]).kg);
-          const total = keys.reduce((sum,key)=>sum+normalizeStockEntry(stock[key]).kg,0);
-          if (total + 1e-9 < remaining) { shortage = true; return; }
-          for (const key of keys) {
-            if (remaining <= 1e-9) break;
-            const raw = stock[key];
-            const entry = normalizeStockEntry(raw);
-            if (entry.kg <= 0) continue;
-            const used = Math.min(entry.kg, remaining);
-            const remainingGrams = Math.max(0, entry.totalWeightGrams - used * 1000);
-            stock[key] = {
-              ...(raw && typeof raw === 'object' ? raw : {}),
-              kg: round3(remainingGrams / 1000),
-              totalWeightGrams: Math.round(remainingGrams),
-              weightedAveragePricePerKg: entry.weightedAveragePricePerKg ?? fallbackPrice,
-              updatedAt: Date.now()
-            };
-            remaining -= used;
-          }
+        const product = products[req.productId];
+        const available = readyStockOf(product);
+        const wanted = Math.max(0, Math.floor(Number(req.qty) || 0));
+        if (!product || available < wanted) {
+          shortage = true;
+          shortages.push({ name: req.name || product?.name || 'Ürün', available, qty: wanted });
+          return;
         }
+        products[req.productId] = {...product, readyStock: available - wanted};
       }
-      root.filamentStock = stock;
+      root.products = products;
       root.sales = {...(root.sales || {}), [saleRef.key]: record};
       // Bakım fonu: satışın teorik bakım payı aynı atomik işlemde havuza eklenir.
       if (share > 0) {
@@ -508,22 +498,146 @@ function commitSaleWithStock(record, requirements, maintenanceShare = 0) {
           setTimeout(() => runAttempt(attempt + 1).then(resolve, reject), txRetryDelay(attempt));
           return;
         }
-        cloudError(error, 'stok kontrollü satış');
-        toast('Stok güncellenemedi, lütfen tekrar deneyin. Satış kaydedilmedi.', 'error', {title:'Stok senkronizasyonu başarısız'});
+        cloudError(error, 'mamul stok kontrollü satış');
+        toast('Mamul stok güncellenemedi, lütfen tekrar deneyin. Satış kaydedilmedi.', 'error', {title:'Stok senkronizasyonu başarısız'});
         reject(error); return;
       }
       if (!committed) {
         if (duplicate) { resolve(saleRef.key); return; }
-        if (shortage) { toast(`${stockGuardMessage()}. Satış kaydedilmedi.`, 'warning'); reject(new Error('insufficient-stock')); return; }
+        if (shortage) {
+          const detail = shortages.map(s => `${s.name}: hazır ${fmt(s.available,0)}, istenen ${fmt(s.qty,0)}`).join(' · ');
+          toast(`${stockGuardMessage()}. ${detail}. Satış kaydedilmedi.`, 'warning', {title:'Mamul stok yetersiz'});
+          reject(new Error('insufficient-finished-stock')); return;
+        }
         // Eşzamanlı çakışma / iptal: üstel geri çekilmeyle yeniden dene.
         if (attempt < TX_MAX_ATTEMPTS - 1) {
           setTimeout(() => runAttempt(attempt + 1).then(resolve, reject), txRetryDelay(attempt));
           return;
         }
-        toast('Stok güncellenemedi (eşzamanlı çakışma), lütfen tekrar deneyin.', 'error', {title:'Stok senkronizasyonu başarısız'});
+        toast('Mamul stok güncellenemedi (eşzamanlı çakışma), lütfen tekrar deneyin.', 'error', {title:'Stok senkronizasyonu başarısız'});
         reject(new Error('transaction-aborted')); return;
       }
       resolve(saleRef.key);
+    }, false);
+  });
+  return runAttempt(0);
+}
+
+// Üretimde kullanılacak renk tüketimini [{name, grams}] biçimine getirir.
+function normalizeColorUsage(colorUsageMap) {
+  const list = Array.isArray(colorUsageMap)
+    ? colorUsageMap
+    : Object.entries(colorUsageMap || {}).map(([name, grams]) => ({name, grams}));
+  return list
+    .map(row => ({name: sanitizeColorName(row?.name), grams: Math.max(0, Number(row?.grams) || 0)}))
+    .filter(row => row.name && row.grams > 0);
+}
+
+/**
+ * Tek merkezli üretim akışı.
+ * handleProduction(productId, quantity, colorUsageMap)
+ * colorUsageMap: [{name:'Siyah', grams:1200}] — tüm üretim için toplam gram.
+ *
+ * Atomik olarak: her rengin filament stoğunu kontrol eder → yeterliyse gramları düşer
+ * → ürünün readyStock (mamul) adedini artırır → productionLogs'a kayıt yazar.
+ * Yetersiz hammadde varsa hiçbir alan yazılmaz ve işlem reddedilir.
+ */
+function handleProduction(productId, quantity, colorUsageMap) {
+  if (!cloudReady || !rootRef) return Promise.reject(new Error('Bulut bağlantısı kurulmadan üretim kaydedilemez.'));
+  if (!firebaseConnected || navigator.onLine === false) {
+    toast('Bağlantı yok. Hammadde stok kontrolü gerektiren üretim, bağlantı gelene kadar engellendi.', 'warning');
+    return Promise.reject(new Error('offline-stock-guard'));
+  }
+  const qtyParsed = parseStrictNumber(quantity, {min:1, max:100000, integer:true});
+  if (!qtyParsed.ok) {
+    toast(`Üretim adedi geçersiz: ${qtyParsed.reason}.`, 'warning');
+    return Promise.reject(new Error('invalid-quantity'));
+  }
+  const qty = qtyParsed.value;
+  const usage = normalizeColorUsage(colorUsageMap);
+  if (!usage.length) {
+    toast('Üretim için en az bir renk ve tüketilecek gram gir.', 'warning');
+    return Promise.reject(new Error('empty-usage'));
+  }
+  const logRef = productionLogsRef.push();
+  const fallbackPrice = params().filamentPrice;
+  let shortages = [];
+
+  const runAttempt = attempt => new Promise((resolve, reject) => {
+    let shortage = false, duplicate = false, missingProduct = false;
+    shortages = [];
+    rootRef.transaction(current => {
+      shortage = false; duplicate = false; missingProduct = false; shortages = [];
+      const root = current || {};
+      if (root.productionLogs && root.productionLogs[logRef.key]) { duplicate = true; return; }
+      const products = {...(root.products || {})};
+      const product = products[productId];
+      if (!product) { shortage = true; missingProduct = true; return; }
+      const stock = {...(root.filamentStock || {})};
+      for (const use of usage) {
+        const raw = stock[use.name];
+        const entry = normalizeStockEntry(raw);
+        if (entry.totalWeightGrams + 1e-6 < use.grams) {
+          shortage = true;
+          shortages.push({ name: use.name, needed: use.grams, available: entry.totalWeightGrams });
+          return;
+        }
+        const remainingGrams = Math.max(0, entry.totalWeightGrams - use.grams);
+        stock[use.name] = {
+          ...(raw && typeof raw === 'object' ? raw : {}),
+          kg: round3(remainingGrams / 1000),
+          totalWeightGrams: Math.round(remainingGrams),
+          weightedAveragePricePerKg: entry.weightedAveragePricePerKg ?? fallbackPrice,
+          updatedAt: Date.now()
+        };
+      }
+      root.filamentStock = stock;
+      const readyStock = readyStockOf(product) + qty;
+      products[productId] = {...product, readyStock};
+      root.products = products;
+      root.productionLogs = {
+        ...(root.productionLogs || {}),
+        [logRef.key]: {
+          date: todayISO(),
+          productId,
+          productName: product.name || 'İsimsiz ürün',
+          qty,
+          colors: usage.map(use => ({name: use.name, grams: Math.round(use.grams * 100) / 100})),
+          totalGrams: Math.round(usage.reduce((sum, use) => sum + use.grams, 0) * 100) / 100,
+          readyStockAfter: readyStock,
+          createdAt: Date.now()
+        }
+      };
+      return root;
+    }, (error, committed) => {
+      if (error) {
+        if (attempt < TX_MAX_ATTEMPTS - 1 && txShouldRetry(error)) {
+          setTimeout(() => runAttempt(attempt + 1).then(resolve, reject), txRetryDelay(attempt));
+          return;
+        }
+        cloudError(error, 'üretim kaydı');
+        toast('Üretim kaydedilemedi, lütfen tekrar deneyin.', 'error', {title:'Stok senkronizasyonu başarısız'});
+        reject(error); return;
+      }
+      if (!committed) {
+        if (duplicate) { resolve(logRef.key); return; }
+        if (shortage) {
+          if (missingProduct) {
+            toast('Ürün bulunamadı. Üretim kaydedilmedi.', 'error');
+            reject(new Error('missing-product')); return;
+          }
+          const detail = shortages.map(s => `${s.name}: stok ${fmt(s.available/1000,3)} kg, gereken ${fmt(s.needed/1000,3)} kg`).join(' · ');
+          toast(`Yetersiz hammadde. ${detail}. Üretim kaydedilmedi.`, 'error', {title:'Filament stoğu yetersiz'});
+          reject(new Error('insufficient-filament')); return;
+        }
+        if (attempt < TX_MAX_ATTEMPTS - 1) {
+          setTimeout(() => runAttempt(attempt + 1).then(resolve, reject), txRetryDelay(attempt));
+          return;
+        }
+        toast('Üretim kaydedilemedi (eşzamanlı çakışma), lütfen tekrar deneyin.', 'error', {title:'Stok senkronizasyonu başarısız'});
+        reject(new Error('transaction-aborted')); return;
+      }
+      resolve(logRef.key);
     }, false);
   });
   return runAttempt(0);
@@ -898,20 +1012,16 @@ function renderProducts() {
   if ($('hourlyWear')) $('hourlyWear').textContent = `${money(rates.wear)} / saat`;
   const query = $('searchInput').value.trim().toLocaleLowerCase('tr-TR');
   const rows = $('productRows'); rows.innerHTML = '';
-  // Ürün başına üretilebilir adet: stok yoksa ürün yine listelenir, yalnızca rozet uyarır.
-  const stockItems = new Map(stockCalc(x).items.map(item => [String(item.p.id), item]));
   state.products.forEach(p => {
     p.usesLighter = Boolean(p.usesLighter);
     if (!String(p.name ?? '').toLocaleLowerCase('tr-TR').includes(query)) return;
     const c = calc(p,x);
     const colors = productColors(p);
-    const stockItem = stockItems.get(String(p.id));
-    const productQty = Math.max(0, Number(p.qty) || 0);
-    const stockBadge = !stockItem || stockItem.producible <= 0
-      ? '<span class="stock-badge out" title="Bu ürünü üretmek için yeterli filament stoğu yok">Stokta Yok / 0 Adet</span>'
-      : stockItem.producible < productQty
-        ? `<span class="stock-badge low" title="Mevcut stok planın tamamına yetmiyor">Kısmi stok · ${fmt(stockItem.producible,0)} adet</span>`
-        : '';
+    // Ürün listesinde gösterilen stok mamul (hazır ürün) stoğudur; hammadde kapasitesi envanterde.
+    const readyStock = readyStockOf(p);
+    const stockBadge = readyStock <= 0
+      ? '<span class="stock-badge out" title="Hazır mamul stok yok. Satış için önce Üret ile üretim kaydı ekle.">Mamul stok yok · 0 adet</span>'
+      : `<span class="stock-badge ok" title="Satılabilir hazır mamul stoğu">Hazır stok · ${fmt(readyStock,0)} adet</span>`;
     const colorCell = colors.length
       ? `<div class="color-chip-list">${colors.map(color => `<span class="color-chip" title="${esc(color.name || 'Renk')} · adet başına ${fmt(color.grams,1)} g"><i style="background:${colorSwatch(color.name)}"></i>${esc(color.name || 'Renk')} <small>${fmt(color.grams,1)} g</small></span>`).join('')}</div>`
       : '<span class="muted-chip">Renk tanımlanmadı</span>';
@@ -934,7 +1044,8 @@ function renderProducts() {
   });
   refreshTableLabels(rows.closest('table')); syncBulkToolbars();
   const all = state.products.map(p=>({p,c:calc(p,x)}));
-  const units = state.products.reduce((sum,p)=>sum+(Number(p.qty)||0),0);
+  // "Toplam üretim" kartı satılabilir hazır mamul stoğunu gösterir.
+  const units = state.products.reduce((sum,p)=>sum+readyStockOf(p),0);
   const total = all.reduce((sum,item)=>sum+item.c.total,0);
   $('statProducts').textContent = state.products.length;
   $('statUnits').textContent = fmt(units,0);
@@ -977,7 +1088,7 @@ function renderSaleProductOptions() {
   const select = $('saleProduct');
   if (!select) return;
   const previous = select.value;
-  select.innerHTML = state.products.map(p=>`<option value="${esc(p.id)}">${esc(p.name || 'İsimsiz ürün')}</option>`).join('');
+  select.innerHTML = state.products.map(p=>`<option value="${esc(p.id)}">${esc(p.name || 'İsimsiz ürün')} · hazır ${fmt(readyStockOf(p),0)} adet</option>`).join('');
   if (state.products.length && [...select.options].some(o=>o.value===previous)) select.value = previous;
   if (!state.products.length) select.innerHTML = '<option value="">Önce ürün ekle</option>';
 }
@@ -1186,7 +1297,7 @@ function saveStockEntry(event) {
 }
 function addProduct() {
   if (!cloudReady) { toast('Bulut bağlantısı kurulmadan ürün eklenemez.'); return; }
-  const product = {name:'Yeni Ürün',qty:1,grams:0,hours:0,sale:0,usesLighter:true,photo:'',createdAt:Date.now()};
+  const product = {name:'Yeni Ürün',qty:1,grams:0,hours:0,sale:0,usesLighter:true,photo:'',readyStock:0,createdAt:Date.now()};
   productsRef.push(product)
     .then(() => toast('Yeni ürün buluta eklendi.'))
     .catch(error => cloudError(error, 'ürün ekleme'));
@@ -1268,6 +1379,11 @@ function saveSale(event) {
   const priceParsed = parseStrictNumber($('salePrice').value,{min:0,max:10000000});
   if (!qtyParsed.ok || !priceParsed.ok) { toast('Adet ve fiyat geçerli aralıkta olmalı. Satış kaydedilmedi.', 'error'); return; }
   const qty = qtyParsed.value;
+  const readyStock = readyStockOf(product);
+  if (readyStock < qty) {
+    toast(`${stockGuardMessage()}. "${product.name || 'İsimsiz ürün'}" için hazır ${fmt(readyStock,0)} adet var, ${fmt(qty,0)} adet satılamaz. Önce ürün detayından "Üret" ile üretim ekle.`, 'warning', {title:'Mamul stok yetersiz'});
+    return;
+  }
   const unitPrice = priceParsed.value;
   const x = params();
   const unitCost = calc(product, x).unit;
@@ -1278,12 +1394,12 @@ function saveSale(event) {
     revenue:qty*unitPrice, totalCost:qty*unitCost, profit:qty*(unitPrice-unitCost),
     note:$('saleNote').value.trim(), createdAt:Date.now()
   };
-  commitSaleWithStock(record, requiredStockForProduct(product,qty), maintenanceShare)
+  commitSaleWithFinishedStock(record, [{productId:product.id, name:product.name || 'İsimsiz ürün', qty}], maintenanceShare)
     .then(() => {
       $('saleQty').value = 1; $('saleNote').value = '';
       toast(`Satış buluta kaydedildi. Net kâr: ${money(record.profit)}${maintenanceShare > 0 ? ` · Bakım fonuna ${money(maintenanceShare)} aktarıldı` : ''}`);
     })
-    .catch(error => { if(!['insufficient-stock','offline-stock-guard','transaction-aborted'].includes(error.message)) cloudError(error, 'satış kaydetme'); });
+    .catch(error => { if(!['insufficient-finished-stock','offline-stock-guard','transaction-aborted'].includes(error.message)) cloudError(error, 'satış kaydetme'); });
 }
 
 function recordParameterChanges() {
@@ -1581,6 +1697,7 @@ $('saleDetailModal').addEventListener('click',event=>{if(event.target===$('saleD
 document.addEventListener('keydown',event=>{
   if (event.key !== 'Escape') return;
   if ($('photoLightbox') && !$('photoLightbox').hidden) return; // önce lightbox kapanır
+  if ($('productionModal') && !$('productionModal').hidden) { closeProductionModal(); return; }
   $('saleDetailModal').hidden = true;
   if ($('productDetailModal') && !$('productDetailModal').hidden) closeProductDetail();
 });
@@ -1634,6 +1751,7 @@ function renderProductDetail() {
   const x = params();
   const c = calc(product, x);
   const qty = Math.max(0, Number(product.qty) || 0);
+  const readyStock = readyStockOf(product);
   const colors = detailColorList(product);
   const gramPrice = x.filamentPrice / 1000;
   const totalUnitGrams = unitGrams(product);
@@ -1655,14 +1773,32 @@ function renderProductDetail() {
     </div>`;
   }).join('') : '<p class="empty-inline">Bu ürüne henüz renk tanımlanmadı. Aşağıdan renk adı ve gram ekleyebilirsin.</p>';
   const metaItems = [
-    ['Adet', fmt(qty,0)],
+    ['Parti adedi', fmt(qty,0)],
+    ['Hazır mamul stok', `${fmt(readyStock,0)} adet`],
     ['Baskı süresi', `${fmt(Number(product.hours)||0,1)} sa`],
     ['Birim maliyet', money(c.unit)],
     ['Satış fiyatı', money(product.sale)],
     ['Birim kâr', money(c.profit)],
     ['Toplam maliyet', money(c.total)]
   ];
+  const productLogs = productionLogs.filter(log => String(log.productId) === String(product.id)).slice(0, 6);
+  const productionLogHtml = productLogs.length ? `
+    <h3 class="detail-section-title">Son üretim kayıtları</h3>
+    <div class="production-log-list">${productLogs.map(log => {
+      const colorText = (Array.isArray(log.colors) ? log.colors : Object.values(log.colors || {}))
+        .map(color => `${esc(color.name || 'Renk')} ${fmt(Number(color.grams)||0,1)} g`).join(' · ');
+      return `<div class="production-log-row">
+        <span class="production-log-date">${esc(String(log.date || ''))}</span>
+        <span class="production-log-qty">+${fmt(Number(log.qty)||0,0)} adet</span>
+        <span class="production-log-colors">${colorText || 'Renk kaydı yok'}</span>
+        <span class="production-log-total">${fmt(Number(log.totalGrams)||0,1)} g</span>
+      </div>`;
+    }).join('')}</div>` : '<p class="empty-inline">Henüz üretim kaydı yok. Üret düğmesiyle ilk üretimini ekle.</p>';
   $('productDetailInfo').innerHTML = `
+    <div class="detail-actions">
+      <button class="btn btn-primary" type="button" data-production-open><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Üret</button>
+      <span class="detail-actions-note">Mamul stoğa <strong>${fmt(readyStock,0)} adet</strong> hazır · Üretim hammadde stoğundan düşer.</span>
+    </div>
     <div class="detail-grid product-detail-meta">${metaItems.map(([label,value])=>`<div class="detail-item"><span>${esc(label)}</span><strong>${esc(String(value))}</strong></div>`).join('')}</div>
     <h3 class="detail-section-title">Kullanılan renkler ve filament</h3>
     <div class="color-edit-list">${colorRowsHtml}</div>
@@ -1672,7 +1808,8 @@ function renderProductDetail() {
       <button class="btn btn-primary" type="button" data-detail-add-color>＋ Renk ekle</button>
     </div>
     <datalist id="productColorOptions">${colorOptions.map(name=>`<option value="${esc(name)}"></option>`).join('')}</datalist>
-    <div class="detail-total"><span>Toplam filament<strong>${fmt(totalUnitGrams*qty,1)} g</strong></span><span>Filament maliyeti<strong>${money(c.filament*qty)}</strong></span><span>Renk çeşidi<strong>${fmt(colors.length,0)}</strong></span></div>`;
+    <div class="detail-total"><span>Toplam filament<strong>${fmt(totalUnitGrams*qty,1)} g</strong></span><span>Filament maliyeti<strong>${money(c.filament*qty)}</strong></span><span>Renk çeşidi<strong>${fmt(colors.length,0)}</strong></span></div>
+    ${productionLogHtml}`;
   const photoEl = $('productDetailPhoto');
   photoEl.innerHTML = product.photo
     ? `<button class="detail-photo-btn" type="button" data-detail-photo-open aria-label="Fotoğrafı büyüt" title="Büyütmek için tıkla"><img src="${product.photo}" alt="${esc(product.name||'Ürün')} fotoğrafı"><span class="detail-photo-hint">Büyüt ⤢</span></button>`
@@ -1723,6 +1860,7 @@ if ($('productDetailModal')) {
       return;
     }
     if (event.target.closest('[data-detail-photo-transparent]')) { makeProductPhotoTransparent(detailProductId); return; }
+    if (event.target.closest('[data-production-open]')) { openProductionModal(detailProductId); return; }
     const addButton = event.target.closest('[data-detail-add-color]');
     if (addButton) { addDetailColor(); return; }
     const deleteButton = event.target.closest('[data-color-delete]');
@@ -1740,6 +1878,170 @@ if ($('productDetailModal')) {
     if(colorInput.type==='number' && !validateNumericElement(colorInput)) { renderProductDetail(productById(detailProductId)); return; }
     updateDetailColor(Number(colorInput.dataset.colorIndex), colorInput.dataset.colorField, colorInput.value);
   });
+}
+
+/* =========================================================
+ * ÜRETİM MODALI — adet + renk başına toplam gram tüketimi
+ * Üretim yalnızca burada hammadde stoğundan düşer ve ürünün
+ * mamul stoğunu (readyStock) artırır.
+ * ========================================================= */
+const PROD = { productId:null, qty:1, rows:[] };
+
+function openProductionModal(productId) {
+  const product = productById(productId);
+  const modal = $('productionModal');
+  if (!product || !modal) return;
+  PROD.productId = String(product.id);
+  PROD.qty = 1;
+  const colors = detailColorList(product).filter(color => color.name);
+  PROD.rows = colors.length
+    ? colors.map(color => ({name: color.name, base: color.grams, grams: color.grams, edited: false}))
+    : [{name: '', base: 0, grams: 0, edited: true}];
+  modal.hidden = false;
+  renderProductionModal();
+  setTimeout(() => $('productionQty')?.focus(), 60);
+}
+function closeProductionModal() {
+  const modal = $('productionModal');
+  if (modal) modal.hidden = true;
+  PROD.productId = null;
+}
+function productionRowMeta(row) {
+  if (!row.name) return '<span class="muted">Renk seçilmedi</span>';
+  const stockGrams = stockKgOf(row.name) * 1000;
+  const remaining = stockGrams - Math.max(0, Number(row.grams) || 0);
+  return `Stok: ${fmt(stockGrams / 1000, 2)} kg · <strong class="${remaining < -1e-6 ? 'is-bad' : 'is-good'}">${remaining < -1e-6 ? `${fmt(-remaining, 1)} g eksik` : `kalan ${fmt(remaining, 1)} g`}</strong>`;
+}
+function updateProductionSubtitle() {
+  const product = productById(PROD.productId);
+  const el = $('productionSubtitle');
+  if (!product || !el) return;
+  const ready = readyStockOf(product);
+  el.textContent = `Hazır mamul stok: ${fmt(ready, 0)} adet · Üretim sonrası: ${fmt(ready + PROD.qty, 0)} adet`;
+}
+function updateProductionTotals() {
+  const box = $('productionTotals');
+  if (!box) return;
+  const x = params();
+  const totalGrams = PROD.rows.reduce((sum, row) => sum + Math.max(0, Number(row.grams) || 0), 0);
+  const cost = PROD.rows.reduce((sum, row) => {
+    const grams = Math.max(0, Number(row.grams) || 0);
+    return sum + (row.name ? (grams / 1000) * colorAveragePrice(row.name, x.filamentPrice) : 0);
+  }, 0);
+  box.innerHTML = `<span>Toplam tüketim<strong>${fmt(totalGrams, 1)} g</strong></span><span>Tahmini filament maliyeti<strong>${money(cost)}</strong></span><span>Üretilecek<strong>${fmt(PROD.qty, 0)} adet</strong></span>`;
+  document.querySelectorAll('[data-prod-meta]').forEach(el => {
+    const row = PROD.rows[Number(el.dataset.prodMeta)];
+    if (row) el.innerHTML = productionRowMeta(row);
+  });
+  updateProductionSubtitle();
+}
+function renderProductionModal() {
+  const modal = $('productionModal');
+  if (!modal || modal.hidden) return;
+  const product = productById(PROD.productId);
+  if (!product) { closeProductionModal(); return; }
+  $('productionTitle').textContent = `${product.name || 'İsimsiz ürün'} — üretim`;
+  const qtyInput = $('productionQty');
+  if (qtyInput && document.activeElement !== qtyInput) qtyInput.value = PROD.qty;
+  const colorOptions = [...new Set([
+    ...Object.keys(filamentStock || {}),
+    ...PROD.rows.map(row => row.name)
+  ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'tr'));
+  $('productionColorOptions').innerHTML = colorOptions.map(name => `<option value="${esc(name)}"></option>`).join('');
+  $('productionColorRows').innerHTML = PROD.rows.map((row, index) => `<div class="color-edit-row production-color-row" data-prod-row="${index}">
+    <span class="color-dot" style="background:${colorSwatch(row.name)}"></span>
+    <input class="color-name-input" list="productionColorOptions" data-prod-field="name" value="${esc(row.name)}" placeholder="Renk adı" maxlength="24" aria-label="Renk adı">
+    <div class="input-wrap mini-input"><input type="number" min="0" max="1000000" step="0.1" data-prod-field="grams" value="${Number(row.grams) || 0}" aria-label="Toplam tüketim gramı"><b>g</b></div>
+    <div class="color-edit-meta production-row-meta" data-prod-meta="${index}">${productionRowMeta(row)}</div>
+    <button class="delete-btn" type="button" data-prod-remove="${index}" title="Tüketim satırını kaldır" aria-label="Tüketim satırını kaldır">×</button>
+  </div>`).join('');
+  updateProductionTotals();
+}
+function saveProduction(event) {
+  event.preventDefault();
+  const product = productById(PROD.productId);
+  if (!product) { toast('Ürün bulunamadı. Üretim kaydedilmedi.', 'error'); return; }
+  if (!validateFormInputs($('productionForm'))) return;
+  const qtyParsed = parseStrictNumber($('productionQty').value, {min:1, max:100000, integer:true});
+  if (!qtyParsed.ok) { toast(`Üretim adedi: ${qtyParsed.reason}.`, 'warning'); return; }
+  const rows = [...$('productionColorRows').querySelectorAll('[data-prod-row]')].map(rowEl => ({
+    name: sanitizeColorName(rowEl.querySelector('[data-prod-field="name"]')?.value),
+    grams: Number(rowEl.querySelector('[data-prod-field="grams"]')?.value)
+  }));
+  const usage = [];
+  for (const row of rows) {
+    if (!row.name && !(row.grams > 0)) continue;
+    if (!row.name) { toast('Her tüketim satırı için bir renk adı gir.', 'warning'); return; }
+    if (!(row.grams > 0)) { toast(`"${row.name}" için toplam tüketim gramı 0'dan büyük olmalı.`, 'warning'); return; }
+    usage.push(row);
+  }
+  if (!usage.length) { toast('Üretim için en az bir renk ve tüketilecek gram gir.', 'warning'); return; }
+  const submitBtn = $('productionSubmit');
+  if (submitBtn) submitBtn.disabled = true;
+  handleProduction(product.id, qtyParsed.value, usage)
+    .then(() => {
+      const produced = qtyParsed.value;
+      closeProductionModal();
+      toast(`"${product.name || 'İsimsiz ürün'}" için ${fmt(produced, 0)} adet üretim kaydedildi. Hammadde stoğu düşüldü, mamul stoğa eklendi.`, 'success');
+    })
+    .catch(() => {})   // handleProduction kullanıcıya ayrıntılı toast gösterir
+    .finally(() => { if (submitBtn) submitBtn.disabled = false; });
+}
+if ($('productionModal')) {
+  $('closeProduction').addEventListener('click', closeProductionModal);
+  $('productionCancel').addEventListener('click', closeProductionModal);
+  $('productionModal').addEventListener('click', event => {
+    if (event.target === $('productionModal')) { closeProductionModal(); return; }
+    if (event.target.closest('#productionAddColor')) {
+      const name = sanitizeColorName($('productionNewColor').value);
+      const gramsParsed = parseStrictNumber($('productionNewGrams').value, {min:0.001, max:1000000});
+      if (!name) { toast('Eklemek için bir renk adı gir.', 'warning'); return; }
+      if (!gramsParsed.ok) { toast(`Tüketim gramı: ${gramsParsed.reason}.`, 'warning'); return; }
+      PROD.rows.push({name, base: 0, grams: gramsParsed.value, edited: true});
+      $('productionNewColor').value = '';
+      $('productionNewGrams').value = 0;
+      renderProductionModal();
+      return;
+    }
+    const removeButton = event.target.closest('[data-prod-remove]');
+    if (removeButton) {
+      PROD.rows.splice(Number(removeButton.dataset.prodRemove), 1);
+      if (!PROD.rows.length) PROD.rows.push({name: '', base: 0, grams: 0, edited: true});
+      renderProductionModal();
+    }
+  });
+  $('productionQty').addEventListener('input', () => {
+    const parsed = parseStrictNumber($('productionQty').value, {min:1, max:100000, integer:true});
+    if (!parsed.ok) { validateNumericElement($('productionQty'), {silent:true}); return; }
+    if (parsed.value === PROD.qty) return;
+    PROD.rows.forEach(row => {
+      if (!row.edited) row.grams = Math.round(row.base * parsed.value * 100) / 100;
+    });
+    PROD.qty = parsed.value;
+    renderProductionModal();
+  });
+  $('productionColorRows').addEventListener('input', event => {
+    const field = event.target.closest('[data-prod-field]');
+    const rowEl = event.target.closest('[data-prod-row]');
+    if (!field || !rowEl) return;
+    const row = PROD.rows[Number(rowEl.dataset.prodRow)];
+    if (!row) return;
+    if (field.dataset.prodField === 'grams') {
+      row.grams = Math.max(0, Number(field.value) || 0);
+      row.edited = true;
+      updateProductionTotals();
+    }
+  });
+  $('productionColorRows').addEventListener('change', event => {
+    const field = event.target.closest('[data-prod-field="name"]');
+    if (!field) return;
+    const rowEl = field.closest('[data-prod-row]');
+    const row = rowEl ? PROD.rows[Number(rowEl.dataset.prodRow)] : null;
+    if (!row) return;
+    row.name = sanitizeColorName(field.value);
+    renderProductionModal();
+  });
+  $('productionForm').addEventListener('submit', saveProduction);
 }
 
 /* ---------- Renk stoğu tablosu olayları ---------- */
@@ -2623,7 +2925,7 @@ function renderPackageRows() {
   const wrap = $('pkgItemRows');
   if (!wrap) return;
   const options = state.products.length
-    ? '<option value="">Ürün seç…</option>' + state.products.map(p => `<option value="${esc(p.id)}">${esc(p.name || 'İsimsiz ürün')}</option>`).join('')
+    ? '<option value="">Ürün seç…</option>' + state.products.map(p => `<option value="${esc(p.id)}">${esc(p.name || 'İsimsiz ürün')} · hazır ${fmt(readyStockOf(p),0)} adet</option>`).join('')
     : '<option value="">Önce ürün ekle</option>';
   wrap.innerHTML = PKG.items.map((item, i) => `<div class="pkg-item-row" data-pkg-row="${i}">
     <select data-pkg-field="productId" aria-label="Pakete dahil ürün">${options}</select>
@@ -2699,6 +3001,11 @@ function savePackageSale(event) {
   });
   const x = params();
   const lines = [...merged.values()];
+  const shortageLine = lines.find(l => readyStockOf(l.p) < l.qty * c.pq);
+  if (shortageLine) {
+    toast(`${stockGuardMessage()}. "${shortageLine.p.name || 'İsimsiz ürün'}" için hazır ${fmt(readyStockOf(shortageLine.p),0)} adet var, ${fmt(shortageLine.qty * c.pq,0)} adet gerekiyor.`, 'warning', {title:'Mamul stok yetersiz'});
+    return;
+  }
   const maintenanceShare = round2(lines.reduce(
     (sum, l) => sum + maintenanceShareForProduct(l.p, l.qty * c.pq, x), 0
   ));
@@ -2730,8 +3037,10 @@ function savePackageSale(event) {
       capturedAt: new Date().toISOString()
     }
   };
-  const requirements = [...merged.values()].map(line => requiredStockForProduct(line.p, line.qty * c.pq)).flat();
-  commitSaleWithStock(record, requirements, maintenanceShare)
+  const requirements = lines.map(line => ({
+    productId: line.p.id, name: line.p.name || 'İsimsiz ürün', qty: line.qty * c.pq
+  }));
+  commitSaleWithFinishedStock(record, requirements, maintenanceShare)
     .then(() => {
       PKG.items = [{productId:'', qty:1}];
       $('pkgName').value = ''; $('pkgNote').value = ''; $('pkgQty').value = 1; $('pkgPrice').value = 0;
@@ -2739,7 +3048,7 @@ function savePackageSale(event) {
       renderPackageRows();
       toast(`Paket satışı buluta kaydedildi. Net kâr: ${money(record.profit)}${maintenanceShare > 0 ? ` · Bakım fonuna ${money(maintenanceShare)} aktarıldı` : ''}`);
     })
-    .catch(error => { if(!['insufficient-stock','offline-stock-guard','transaction-aborted'].includes(error.message)) cloudError(error, 'paket satışı kaydetme'); });
+    .catch(error => { if(!['insufficient-finished-stock','offline-stock-guard','transaction-aborted'].includes(error.message)) cloudError(error, 'paket satışı kaydetme'); });
 }
 function saleNameCell(sale) {
   if (sale.type !== 'package') return esc(sale.productName);
@@ -2968,13 +3277,22 @@ function exportExcel() {
     };
     const p = params();
     addSheet('Urunler',
-      ['Ürün', 'Adet', 'Toplam gram', 'Baskı süresi (saat)', 'Satış fiyatı (TL)', 'Renkler', 'Birim maliyet (TL)', 'Birim kâr (TL)'],
+      ['Ürün', 'Adet', 'Hazır mamul stok', 'Toplam gram', 'Baskı süresi (saat)', 'Satış fiyatı (TL)', 'Renkler', 'Birim maliyet (TL)', 'Birim kâr (TL)'],
       state.products.map(prod => {
         const c = calc(prod);
-        return [prod.name || 'İsimsiz ürün', Number(prod.qty) || 0, Number(prod.grams) || 0, Number(prod.hours) || 0,
+        return [prod.name || 'İsimsiz ürün', Number(prod.qty) || 0, readyStockOf(prod), Number(prod.grams) || 0, Number(prod.hours) || 0,
           round2(prod.sale), colorSummary(prod), round2(c.unit), round2(c.profit)];
       }),
-      [28, 8, 14, 20, 18, 40, 18, 16]);
+      [28, 8, 18, 14, 20, 18, 40, 18, 16]);
+    addSheet('Uretim',
+      ['Tarih', 'Ürün', 'Adet', 'Renk tüketimi', 'Toplam gram', 'Üretim sonrası mamul'],
+      productionLogs.map(log => {
+        const colors = Array.isArray(log.colors) ? log.colors : Object.values(log.colors || {});
+        return [log.date || '', log.productName || '', Number(log.qty) || 0,
+          colors.map(color => `${color.name} ${color.grams} g`).join(' | '),
+          round2(log.totalGrams), Number(log.readyStockAfter) || 0];
+      }),
+      [12, 30, 8, 50, 14, 22]);
     addSheet('Satislar',
       ['Tarih', 'Tür', 'Ürün / paket', 'Adet', 'Satılan birim', 'Birim fiyat (TL)', 'Ciro (TL)', 'Birim maliyet (TL)', 'Toplam maliyet (TL)', 'Net kâr (TL)', 'Bakım payı (TL)', 'Not'],
       sales.map(sale => [sale.date || '', sale.type === 'package' ? 'Paket' : 'Tekli', sale.productName || '',
@@ -3016,8 +3334,8 @@ function exportCsv() {
   const dataset = $('csvDataset')?.value || 'sales';
   let headers = [], rows = [];
   if (dataset === 'products') {
-    headers = ['Ürün', 'Adet', 'Toplam gram', 'Baskı süresi (saat)', 'Satış fiyatı', 'Renkler'];
-    rows = state.products.map(prod => [prod.name || '', Number(prod.qty) || 0, Number(prod.grams) || 0, Number(prod.hours) || 0, round2(prod.sale), colorSummary(prod)]);
+    headers = ['Ürün', 'Adet', 'Hazır mamul stok', 'Toplam gram', 'Baskı süresi (saat)', 'Satış fiyatı', 'Renkler'];
+    rows = state.products.map(prod => [prod.name || '', Number(prod.qty) || 0, readyStockOf(prod), Number(prod.grams) || 0, Number(prod.hours) || 0, round2(prod.sale), colorSummary(prod)]);
   } else if (dataset === 'stock') {
     headers = ['Renk', 'Stok (kg)', 'Toplam gram', 'Ağırlıklı ortalama fiyat (TL/kg)'];
     rows = Object.entries(filamentStock).map(([color, raw]) => {
@@ -3042,7 +3360,7 @@ function exportJsonBackup() {
     })
     .catch(error => cloudError(error, 'JSON yedeği'));
 }
-const BACKUP_ALLOWED_KEYS = ['params', 'filamentStock', 'products', 'sales', 'costHistory', 'maintenanceFund', 'maintenanceLogs', 'auth', 'system'];
+const BACKUP_ALLOWED_KEYS = ['params', 'filamentStock', 'products', 'sales', 'costHistory', 'maintenanceFund', 'maintenanceLogs', 'productionLogs', 'auth', 'system'];
 function restoreJsonBackup(file) {
   if (!file) return;
   if (!cloudReady || !rootRef) { toast('Bulut bağlantısı olmadan yedek geri yüklenemez.', 'warning'); return; }

@@ -108,9 +108,9 @@
           <small>Kayıtlı ürün</small>
         </article>
         <article class="stat-card">
-          <div class="stat-top"><span>Toplam üretim</span><span class="stat-icon blue"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 8 4.5-8 4.5-8-4.5L12 3Z"/><path d="m4 11.5 8 4.5 8-4.5"/><path d="m4 16.5 8 4.5 8-4.5"/></svg></span></div>
-          <strong id="statUnits">45</strong>
-          <small>Ürün tablosundaki adet</small>
+          <div class="stat-top"><span>Hazır mamul stoğu</span><span class="stat-icon blue"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 8 4.5-8 4.5-8-4.5L12 3Z"/><path d="m4 11.5 8 4.5 8-4.5"/><path d="m4 16.5 8 4.5 8-4.5"/></svg></span></div>
+          <strong id="statUnits">0</strong>
+          <small>Hazır mamul stok adedi</small>
         </article>
         <article class="stat-card">
           <div class="stat-top"><span>Toplam üretim maliyeti</span><span class="stat-icon orange"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7.5h17v9h-17z"/><path d="M12 9.5v5M9.8 11h4.4M9.8 13h4.4"/></svg></span></div>
@@ -160,7 +160,7 @@
       </section>
 
       <section class="page-section panel sales-panel" id="sales">
-        <div class="section-heading"><div><p class="eyebrow">03 / SATIŞ TAKİBİ</p><h2>Satış kaydı ekle</h2><p class="muted">Her satış ayrı kaydedilir. Kayıt anındaki birim maliyet saklandığı için geçmiş kâr hesabı sonradan değişmez.</p></div><span class="tag">Otomatik kaydetme</span></div>
+        <div class="section-heading"><div><p class="eyebrow">03 / SATIŞ TAKİBİ</p><h2>Satış kaydı ekle</h2><p class="muted">Her satış ayrı kaydedilir; satış yalnızca ürünün hazır mamul stoğundan düşer. Kayıt anındaki birim maliyet saklandığı için geçmiş kâr hesabı sonradan değişmez.</p></div><span class="tag">Otomatik kaydetme</span></div>
         <div class="sale-mode" role="tablist" aria-label="Satış türü">
           <button type="button" class="sale-mode-btn active" role="tab" aria-selected="true" data-sale-mode="single">Tekli satış</button>
           <button type="button" class="sale-mode-btn" role="tab" aria-selected="false" data-sale-mode="package" id="addPackageSale"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg>Paket Satış Ekle</button>
@@ -401,6 +401,32 @@
         <div class="product-detail-info" id="productDetailInfo"></div>
         <div class="product-detail-photo" id="productDetailPhoto"></div>
       </div>
+    </section>
+  </div>
+  <div class="modal-backdrop" id="productionModal" hidden>
+    <section class="detail-modal production-modal" role="dialog" aria-modal="true" aria-labelledby="productionTitle">
+      <div class="detail-modal-head">
+        <div><p class="eyebrow">ÜRETİM KAYDI</p><h2 id="productionTitle">Üretim</h2><p id="productionSubtitle" class="muted"></p></div>
+        <button class="modal-close" id="closeProduction" type="button" aria-label="Kapat">×</button>
+      </div>
+      <form id="productionForm" class="production-form" novalidate>
+        <div class="production-summary" id="productionTotals" aria-live="polite"></div>
+        <label class="field production-qty-field"><span>Üretilecek adet</span><div class="input-wrap"><input id="productionQty" type="number" min="1" max="100000" step="1" value="1" required><b>adet</b></div></label>
+        <div class="color-stock-head production-colors-head">
+          <div><h3>Renk ve filament tüketimi</h3><p class="muted">Tüm üretim için toplam gramı gir. Stok yetersizse üretim kaydedilmez.</p></div>
+        </div>
+        <div id="productionColorRows" class="color-edit-list"></div>
+        <div class="color-add-row">
+          <input id="productionNewColor" list="productionColorOptions" placeholder="Renk adı" maxlength="24" autocomplete="off" aria-label="Yeni renk adı">
+          <div class="input-wrap mini-input"><input id="productionNewGrams" type="number" min="0" max="1000000" step="0.1" value="0" placeholder="Gram" aria-label="Yeni rengin toplam gramı"><b>g</b></div>
+          <button class="btn btn-primary" type="button" id="productionAddColor">＋ Renk ekle</button>
+        </div>
+        <datalist id="productionColorOptions"></datalist>
+        <div class="confirm-actions">
+          <button class="btn btn-ghost" id="productionCancel" type="button">Vazgeç</button>
+          <button class="btn btn-primary" id="productionSubmit" type="submit">Üretimi kaydet</button>
+        </div>
+      </form>
     </section>
   </div>
   <div class="modal-backdrop" id="saleDetailModal" hidden>

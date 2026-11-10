@@ -47,7 +47,13 @@ printcost/
 │   └── {renkAdı}: kilogram (örn. "Siyah": 1.25)
 ├── products/{pushId}/
 │   ├── name, qty, grams, hours, sale, usesLighter, photo (Base64 Data URL),
+│   ├── readyStock  (hazır mamul / satılabilir adet — üretim artırır, satış düşer)
 │   ├── colors/ [{ name, grams }]  (renk başına adet gramı)
+│   └── createdAt
+├── productionLogs/{pushId}/
+│   ├── date, productId, productName, qty,
+│   ├── colors/ [{ name, grams }]  (üretimde tüketilen toplam renk gramları)
+│   ├── totalGrams, readyStockAfter
 │   └── createdAt
 ├── sales/{pushId}/
 │   ├── date, productId, productName, qty, unitPrice, unitCost,
@@ -61,19 +67,22 @@ printcost/
   renk ve kilogram girilerek eklenir, satır içindeki alandan güncellenir.
 - Ürünün `colors` dizisi, her renkten adet başına kaç gram kullanıldığını tutar.
   Ürün detay modalında renk eklenip çıkarılabilir; toplam gram otomatik güncellenir.
+- `products/{pushId}/readyStock` satılabilir hazır mamul adedidir. Alan yoksa 0 kabul
+  edilir (eski kayıtlar bozulmaz); yalnızca üretim artırır, satış düşer.
 - Parametre değişiklikleri `update()` ile ilgili alanlara yazılır.
 - Ürün ekleme/silme `push()` / `remove()` ile yapılır.
-- Her yazma sonrası `onValue` dinleyicisi tüm açık sekmeleri günceller. Realtime Database Web SDK, sekme açık kaldığı sürece çevrimdışı yazmaları bellekte kuyruğa alır ve bağlantı gelince otomatik tekrar gönderir. Bu kuyruk sekme kapatılır/yenilenirse diskte saklanmaz; Web SDK'da Android/iOS'taki `setPersistenceEnabled()` API'si yoktur. Satışlar stok düşümü ve satış kaydını tek Realtime Database transaction'ında yazar.
+- Her yazma sonrası `onValue` dinleyicisi tüm açık sekmeleri günceller. Realtime Database Web SDK, sekme açık kaldığı sürece çevrimdışı yazmaları bellekte kuyruğa alır ve bağlantı gelince otomatik tekrar gönderir. Bu kuyruk sekme kapatılır/yenilenirse diskte saklanmaz; Web SDK'da Android/iOS'taki `setPersistenceEnabled()` API'si yoktur. Satışlar mamul stok düşümü ve satış kaydını; üretim ise hammadde düşümü, mamul stoğu artışı ve üretim kaydını tek Realtime Database transaction'ında yazar.
 - Ürün fotoğrafları istemci tarafında 640 px sınırında küçültülür, WebP (desteklenmiyorsa JPEG/PNG) olarak optimize edilir ve `FileReader` + canvas ile Base64 Data URL'e dönüştürülür. Sonuç doğrudan `products/{pushId}/photo` alanında metin olarak saklanır; Firebase Storage kullanılmaz. Fotoğraf veritabanı yazma sınırını aşmasın diye Base64 uzunluğu kontrol edilir.
 
 
-## 2.1 Kurumsal stok, fotoğraf ve oturum ayarları
+## 2.1 Üretim, mamul stoğu, fotoğraf ve oturum ayarları
 
-- Tekli ve paket satışları, renk bazlı filament stoğunu önce kontrol eder. Yetersiz stokta satış kaydı oluşturulmaz; stok ve satış aynı veritabanı transaction'ında güncellenir. Renksiz ürünler mevcut renk stoklarından sırayla düşülür.
-- Üretim adet/gramaj değişiklikleri stok yetersiz olsa bile kaydedilir; ürün listesinde "Stokta Yok / 0 Adet" veya "Kısmi stok" rozetiyle uyarılır. Stok kontrolü yalnızca satış kaydında uygulanır. Sayısal alanlar boş, NaN, negatif veya tanımlı sınırların dışındaysa kaydedilmez ve Toast gösterilir.
+- **Stok tek merkezden yönetilir: üretim ve mamul stoğu.** Satışlar hammadde filament stoğuna dokunmaz; yalnızca ürünün `readyStock` (hazır mamul) adedini düşer. Tekli ve paket satışları, satış anında mamul stoğu kontrol eder; yetersizse satış kaydı oluşturulmaz ve kullanıcıya "önce üretim yap" uyarısı gösterilir.
+- **Üret** düğmesi ürün detay penceresindedir. Açılan formda üretilecek adet ile renk başına toplam gram girilir (çok renkli/AMS/CFS baskılar desteklenir). `handleProduction(productId, quantity, colorUsageMap)` tek bir `rootRef.transaction()` içinde sırasıyla: her rengin filament stoğunu kontrol eder → yeterliyse gramları ağırlıklı ortalama fiyatı koruyarak düşer → `products/{id}/readyStock` değerini üretilen adet kadar artırır → `productionLogs` düğümüne tarih, adet ve renk tüketimlerini yazar. Hammadde yetersizse hiçbir alan yazılmaz ve üretim engellenir.
+- Ürün adet/gramaj değişiklikleri stok yetersiz olsa bile kaydedilir; ürün listesindeki rozet hazır mamul stoğunu gösterir ("Mamul stok yok" / "Hazır stok · N adet"). Hammaddeyle basılabilir adet envanter sayfasında ayrıca hesaplanır. Sayısal alanlar boş, NaN, negatif veya tanımlı sınırların dışındaysa kaydedilmez ve Toast gösterilir.
 - Ürün/satış silme işlemleri 5 saniye geciktirilir; bu sürede Geri Al ile kayıt eski anahtarına geri yüklenebilir. Ürün tablosunda toplu silme ve yüzde bazlı satış fiyatı artırma; satış geçmişinde toplu silme bulunur. Tarihsel satış fiyatları muhasebe tutarlılığı için toplu zamdan etkilenmez.
 - Firebase Storage entegrasyonu tamamen kaldırılmıştır; `firebase-storage-compat.js` yüklenmez ve Storage kuralları gerekmez. Fotoğraf yükleme `FileReader` ile okunur, canvas üzerinde en fazla 640 px'e küçültülür ve Base64 Data URL olarak Realtime Database'e yazılır. Veritabanı kurallarında `products` düğümüne yazma izni verilmesi yeterlidir.
-- Uygulama sekmesi arka planda 5 dakika veya daha uzun kaldıktan sonra tekrar görünür olduğunda oturum kapatılır. Bağlantı kesikken ürün/parametre gibi normal yazmalar sekme açık kaldığı sürece Firebase Web SDK kuyruğunda tutulur; stok transaction'ı gerektiren satışlar stok güvenliği için çevrimdışıyken engellenir.
+- Uygulama sekmesi arka planda 5 dakika veya daha uzun kaldıktan sonra tekrar görünür olduğunda oturum kapatılır. Bağlantı kesikken ürün/parametre gibi normal yazmalar sekme açık kaldığı sürece Firebase Web SDK kuyruğunda tutulur; mamul stok doğrulaması gerektiren satışlar ve hammadde kontrolü gerektiren üretimler stok güvenliği için çevrimdışıyken engellenir.
 - 768 px altındaki ekranlarda ürün, satış ve envanter tabloları etiketli kart düzenine geçer.
 
 ## 3. Güvenlik kuralları
