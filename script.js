@@ -448,6 +448,54 @@ function txRetryDelay(attempt) { return 400 * Math.pow(2, attempt) + Math.floor(
 function txShouldRetry(error) { return !/PERMISSION_DENIED/i.test(String(error?.code || error?.message || '')); }
 
 /**
+ * Transaction süresince kök düğüm önbelleğini açık tutar.
+ *
+ * Firebase Web SDK'da transaction, yolun değeri yerel önbellekte yoksa update
+ * fonksiyonunu `null` ile çağırır ve dönen değer `undefined` ise SUNUCUYA HİÇ
+ * GİTMEDEN iptal eder (onComplete(null, false)). Uygulama `printcost` kökünü
+ * doğrudan dinlemediği için (yalnızca products, sales vb. alt düğümler dinlenir)
+ * kök önbelleği boştur; bu yüzden geçerli ürün "bulunamadı" sanılıyordu.
+ *
+ * Tek seferlik `once()` çözüm değildir: dinleyici kalkınca SDK önbellek düğümünü
+ * de siler. Bu yüzden ilk değer gelene kadar bekleyen AKTİF bir dinleyici kurulur
+ * ve transaction bitene kadar (release çağrılana kadar) kaldırılmaz.
+ *
+ * Kullanım: acquireRootCache().then(release => islem().finally(release));
+ */
+function acquireRootCache() {
+  if (!rootRef) return Promise.resolve(() => {});
+  return new Promise(resolve => {
+    let settled = false, timer = null;
+    let release = () => {};
+    const finish = ok => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (!ok) { try { rootRef.off('value', handler); } catch (e) { /* yok say */ } }
+      resolve(release);
+    };
+    const handler = () => finish(true);
+    release = () => {
+      try { rootRef.off('value', handler); } catch (e) { /* yok say */ }
+    };
+    try {
+      rootRef.on('value', handler, error => {
+        console.warn('Kök veri senkronizasyonu başarısız; transaction yine de denenecek.', error);
+        finish(false);
+      });
+    } catch (error) {
+      console.warn('Kök veri dinleyicisi kurulamadı; transaction yine de denenecek.', error);
+      finish(false);
+      return;
+    }
+    // Bağlantı hiç kurulamazsa sonsuza kadar beklememek için güvenlik zaman aşımı.
+    timer = setTimeout(() => finish(false), 10000);
+    // Transaction beklenmedik şekilde takılırsa dinleyici 30 sn sonra yine bırakılır.
+    setTimeout(() => { if (settled) release(); }, 30000);
+  });
+}
+
+/**
  * Satışı + mamul stok düşümünü + bakım fonu tahakkukunu tek atomik transaction'da birleştirir.
  * requirements: [{productId, name, qty}] — satılan mamul adetleri.
  * Hammadde filament stoğuna bu fonksiyon dokunmaz; o yalnızca handleProduction'da düşer.
@@ -526,7 +574,7 @@ function commitSaleWithFinishedStock(record, requirements, maintenanceShare = 0)
       resolve(saleRef.key);
     }, false);
   });
-  return runAttempt(0);
+  return acquireRootCache().then(release => runAttempt(0).finally(release));
 }
 
 // Üretimde kullanılacak renk tüketimini [{name, grams}] biçimine getirir.
@@ -548,7 +596,7 @@ function normalizeColorUsage(colorUsageMap) {
  * → ürünün readyStock (mamul) adedini artırır → productionLogs'a kayıt yazar.
  * Yetersiz hammadde varsa hiçbir alan yazılmaz ve işlem reddedilir.
  */
-function handleProduction(productId, quantity, colorUsageMap) {
+function handleProduction(productId, quantity, colorUsageMap, nameHint) {
   if (!cloudReady || !rootRef) return Promise.reject(new Error('Bulut bağlantısı kurulmadan üretim kaydedilemez.'));
   if (!firebaseConnected || navigator.onLine === false) {
     toast('Bağlantı yok. Hammadde stok kontrolü gerektiren üretim, bağlantı gelene kadar engellendi.', 'warning');
@@ -567,8 +615,11 @@ function handleProduction(productId, quantity, colorUsageMap) {
   }
   const logRef = productionLogsRef.push();
   const fallbackPrice = params().filamentPrice;
-  // Eşleştirme için yerel kayıttaki ad da ipucu olarak taşınır (kimlik tutmazsa son çare).
-  const productNameHint = productById(productId)?.name;
+  // Eşleştirme için ürün adı ipucu: modal, yerel kayıt artık görünmüyorsa bile adı geçirir.
+  let productNameHint = String(nameHint || productById(productId)?.name || '');
+  // İlk denemede çözülen anahtar kullanılır; bulut anlık görüntüsü eskiyse taze okumayla güncellenir.
+  let lookupId = productId;
+  let freshLookupDone = false;
   let shortages = [];
 
   const runAttempt = attempt => new Promise((resolve, reject) => {
@@ -580,7 +631,8 @@ function handleProduction(productId, quantity, colorUsageMap) {
       if (root.productionLogs && root.productionLogs[logRef.key]) { duplicate = true; return; }
       const products = {...(root.products || {})};
       // ID'yi esnek çöz: birebir anahtar, normalize anahtar, kayıt içi id veya benzersiz ad.
-      const productKey = matchProductKey(products, productId, productNameHint);
+      const productKey = matchProductKey(products, lookupId, productNameHint)
+        || matchProductKey(products, productId, productNameHint);
       const product = productKey ? products[productKey] : null;
       if (!productKey || !product) { shortage = true; missingProduct = true; return; }
       const stock = {...(root.filamentStock || {})};
@@ -633,11 +685,37 @@ function handleProduction(productId, quantity, colorUsageMap) {
         if (duplicate) { resolve(logRef.key); return; }
         if (shortage) {
           if (missingProduct) {
-            // Yerelde ürün varken bulut anlık görüntüsü henüz ürünleri içermiyorsa
-            // (ilk bağlantı / sekme uyanması) hemen hata vermek yerine kısa bir
-            // gecikmeyle tekrar denenir. Gerçekten olmayan ürün için yine hata verilir.
+            // 1) Yerelde ürün varken bulut anlık görüntüsü henüz ürünleri içermiyorsa
+            //    (ilk bağlantı / sekme uyanması) hemen hata vermek yerine kısa bir
+            //    gecikmeyle tekrar denenir.
             if (productById(productId) && attempt < TX_MAX_ATTEMPTS - 1) {
               setTimeout(() => runAttempt(attempt + 1).then(resolve, reject), txRetryDelay(attempt));
+              return;
+            }
+            // 2) Son çare: ürün anahtarını buluttan taze oku. Yerel liste eski kalmışsa
+            //    (ör. başka cihazda yedek geri yükleme / anahtar yenilenmesi) doğru
+            //    anahtar bulunup üretim onunla yeniden denenir.
+            if (!freshLookupDone && productsRef) {
+              freshLookupDone = true;
+              console.warn('Üretim: bulut anlık görüntüsünde ürün yok, taze veriyle yeniden deneniyor.', { productId, productNameHint });
+              productsRef.once('value').then(snap => {
+                const freshProducts = snap.val() || {};
+                const freshKey = matchProductKey(freshProducts, productId, productNameHint)
+                  || matchProductKey(freshProducts, lookupId, productNameHint);
+                if (freshKey) {
+                  lookupId = freshKey;
+                  if (freshProducts[freshKey]?.name) productNameHint = freshProducts[freshKey].name;
+                  runAttempt(0).then(resolve, reject);
+                } else {
+                  console.warn('Üretim: ürün bulutta da bulunamadı.', { productId, lookups: Object.keys(freshProducts).slice(0, 20) });
+                  toast('Ürün bulunamadı. Üretim kaydedilmedi.', 'error');
+                  reject(new Error('missing-product'));
+                }
+              }).catch(error => {
+                console.error('üretim ürünü doğrulama', error);
+                toast('Ürün bulunamadı. Üretim kaydedilmedi.', 'error');
+                reject(new Error('missing-product'));
+              });
               return;
             }
             toast('Ürün bulunamadı. Üretim kaydedilmedi.', 'error');
@@ -657,7 +735,7 @@ function handleProduction(productId, quantity, colorUsageMap) {
       resolve(logRef.key);
     }, false);
   });
-  return runAttempt(0);
+  return acquireRootCache().then(release => runAttempt(0).finally(release));
 }
 function undoableDelete(type, id, record, ref, label) {
   const key = `${type}:${id}`;
@@ -1952,7 +2030,7 @@ if ($('productDetailModal')) {
  * Üretim yalnızca burada hammadde stoğundan düşer ve ürünün
  * mamul stoğunu (readyStock) artırır.
  * ========================================================= */
-const PROD = { productId:null, qty:1, rows:[] };
+const PROD = { productId:null, productName:'', qty:1, rows:[] };
 
 function openProductionModal(productId) {
   const product = productById(productId);
@@ -1964,6 +2042,7 @@ function openProductionModal(productId) {
     toast('Ürün kimliği okunamadı. Sayfayı yenileyip tekrar dene.', 'error'); return;
   }
   PROD.productId = String(product.id);
+  PROD.productName = String(product.name || '');
   PROD.qty = 1;
   const colors = detailColorList(product).filter(color => color.name);
   PROD.rows = colors.length
@@ -1977,6 +2056,7 @@ function closeProductionModal() {
   const modal = $('productionModal');
   if (modal) modal.hidden = true;
   PROD.productId = null;
+  PROD.productName = '';
 }
 function productionRowMeta(row) {
   if (!row.name) return '<span class="muted">Renk seçilmedi</span>';
@@ -2011,8 +2091,9 @@ function renderProductionModal() {
   const modal = $('productionModal');
   if (!modal || modal.hidden) return;
   const product = productById(PROD.productId);
-  if (!product) { closeProductionModal(); return; }
-  $('productionTitle').textContent = `${product.name || 'İsimsiz ürün'} — üretim`;
+  // Liste anlık olarak boşalsa bile modalı kapatma; anahtar modal açılırken saklandı.
+  const productName = product?.name || PROD.productName || 'İsimsiz ürün';
+  $('productionTitle').textContent = `${productName} — üretim`;
   const qtyInput = $('productionQty');
   if (qtyInput && document.activeElement !== qtyInput) qtyInput.value = PROD.qty;
   const colorOptions = [...new Set([
@@ -2032,7 +2113,13 @@ function renderProductionModal() {
 function saveProduction(event) {
   event.preventDefault();
   const product = productById(PROD.productId);
-  if (!product) { toast('Ürün bulunamadı. Üretim kaydedilmedi.', 'error'); return; }
+  // Yerel kayıt anlık olarak görünmese bile modal açılırken saklanan gerçek anahtarla
+  // devam edilir; handleProduction anahtarı bulutta taze veriyle doğrular. Böylece
+  // liste senkronizasyonu geciktiğinde üretim boşuna reddedilmez.
+  const productName = String(product?.name || PROD.productName || 'İsimsiz ürün');
+  if (!PROD.productId || String(PROD.productId) === 'undefined') {
+    toast('Ürün bulunamadı. Üretim kaydedilmedi.', 'error'); return;
+  }
   if (!validateFormInputs($('productionForm'))) return;
   const qtyParsed = parseStrictNumber($('productionQty').value, {min:1, max:100000, integer:true});
   if (!qtyParsed.ok) { toast(`Üretim adedi: ${qtyParsed.reason}.`, 'warning'); return; }
@@ -2050,11 +2137,11 @@ function saveProduction(event) {
   if (!usage.length) { toast('Üretim için en az bir renk ve tüketilecek gram gir.', 'warning'); return; }
   const submitBtn = $('productionSubmit');
   if (submitBtn) submitBtn.disabled = true;
-  handleProduction(product.id, qtyParsed.value, usage)
+  handleProduction(PROD.productId, qtyParsed.value, usage, productName)
     .then(() => {
       const produced = qtyParsed.value;
       closeProductionModal();
-      toast(`"${product.name || 'İsimsiz ürün'}" için ${fmt(produced, 0)} adet üretim kaydedildi. Hammadde stoğu düşüldü, mamul stoğa eklendi.`, 'success');
+      toast(`"${productName}" için ${fmt(produced, 0)} adet üretim kaydedildi. Hammadde stoğu düşüldü, mamul stoğa eklendi.`, 'success');
     })
     .catch(() => {})   // handleProduction kullanıcıya ayrıntılı toast gösterir
     .finally(() => { if (submitBtn) submitBtn.disabled = false; });
@@ -3268,6 +3355,7 @@ async function saveMaintenanceExpense(event) {
       resolve();
     }, false);
   });
+  const releaseRootCache = await acquireRootCache();
   try {
     await apply(0);
     $('maintenanceDescription').value = ''; $('maintenanceAmount').value = '';
@@ -3275,6 +3363,8 @@ async function saveMaintenanceExpense(event) {
     toast(`Bakım masrafı ${money(amount)} fondan düşüldü.`, 'success');
   } catch (error) {
     console.error('bakım masrafı', error);
+  } finally {
+    releaseRootCache();
   }
 }
 function initMaintenanceUi() {
@@ -3294,7 +3384,7 @@ function initMaintenanceUi() {
         confirmText:'Sil ve fona iade et', danger:true
       }).then(ok => {
         if (!ok) return;
-        rootRef.transaction(current => {
+        acquireRootCache().then(release => rootRef.transaction(current => {
           const root = current || {};
           if (!root.maintenanceLogs || !root.maintenanceLogs[log.id]) return;
           delete root.maintenanceLogs[log.id];
@@ -3310,7 +3400,7 @@ function initMaintenanceUi() {
         }, error => {
           if (error) { cloudError(error, 'bakım masrafı silme'); return; }
           toast('Masraf kaydı silindi; tutar bakım fonuna iade edildi.', 'success');
-        }, false);
+        }, false).then(release, release));
       });
     });
   }
