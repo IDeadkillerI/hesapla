@@ -493,7 +493,9 @@
       </div>
     </section>
   </div>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- SheetJS yereldir (vendor/xlsx.full.min.js) ve yalnızca Excel dışa aktarımında
+       script.js tarafından isteğe bağlı yüklenir. CDN kullanılmadığı için tarayıcı
+       gizlilik/tracking koruması depolama erişimini engellemez. -->
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
   <script src="firebase-config.js"></script>

@@ -189,7 +189,10 @@ function attachCloudListeners() {
     const value = snap.val() || {};
     state.products = Object.entries(value)
       .filter(([id]) => !pendingDeletes.has(`product:${id}`))
-      .map(([id, product]) => ({id, ...product}))
+      // ÖNEMLİ: id en son yazılır. Eski yedeklerden gelen kayıtlarda kaydın içinde
+      // bulunan "id" alanı Firebase anahtarını ezerse üretim/satış işlemleri yanlış
+      // anahtarla arama yapar. Böylece yerel id her zaman gerçek bulut anahtarıdır.
+      .map(([id, product]) => ({...product, id}))
       .sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0));
     renderProducts();
     renderSales();
@@ -469,15 +472,18 @@ function commitSaleWithFinishedStock(record, requirements, maintenanceShare = 0)
       if (root.sales && root.sales[saleRef.key]) { duplicate = true; return; }
       const products = {...(root.products || {})};
       for (const req of requirements) {
-        const product = products[req.productId];
+        // Üretimdekiyle aynı esnek kimlik çözümlemesi: anahtar / normalize anahtar /
+        // kayıt içi id / benzersiz ad. Böylece satışta da stok bulunamama hatası oluşmaz.
+        const productKey = matchProductKey(products, req.productId, req.name);
+        const product = productKey ? products[productKey] : null;
         const available = readyStockOf(product);
         const wanted = Math.max(0, Math.floor(Number(req.qty) || 0));
-        if (!product || available < wanted) {
+        if (!productKey || !product || available < wanted) {
           shortage = true;
           shortages.push({ name: req.name || product?.name || 'Ürün', available, qty: wanted });
           return;
         }
-        products[req.productId] = {...product, readyStock: available - wanted};
+        products[productKey] = {...product, readyStock: available - wanted};
       }
       root.products = products;
       root.sales = {...(root.sales || {}), [saleRef.key]: record};
@@ -561,6 +567,8 @@ function handleProduction(productId, quantity, colorUsageMap) {
   }
   const logRef = productionLogsRef.push();
   const fallbackPrice = params().filamentPrice;
+  // Eşleştirme için yerel kayıttaki ad da ipucu olarak taşınır (kimlik tutmazsa son çare).
+  const productNameHint = productById(productId)?.name;
   let shortages = [];
 
   const runAttempt = attempt => new Promise((resolve, reject) => {
@@ -571,8 +579,10 @@ function handleProduction(productId, quantity, colorUsageMap) {
       const root = current || {};
       if (root.productionLogs && root.productionLogs[logRef.key]) { duplicate = true; return; }
       const products = {...(root.products || {})};
-      const product = products[productId];
-      if (!product) { shortage = true; missingProduct = true; return; }
+      // ID'yi esnek çöz: birebir anahtar, normalize anahtar, kayıt içi id veya benzersiz ad.
+      const productKey = matchProductKey(products, productId, productNameHint);
+      const product = productKey ? products[productKey] : null;
+      if (!productKey || !product) { shortage = true; missingProduct = true; return; }
       const stock = {...(root.filamentStock || {})};
       for (const use of usage) {
         const raw = stock[use.name];
@@ -593,13 +603,13 @@ function handleProduction(productId, quantity, colorUsageMap) {
       }
       root.filamentStock = stock;
       const readyStock = readyStockOf(product) + qty;
-      products[productId] = {...product, readyStock};
+      products[productKey] = {...product, readyStock};
       root.products = products;
       root.productionLogs = {
         ...(root.productionLogs || {}),
         [logRef.key]: {
           date: todayISO(),
-          productId,
+          productId: productKey,
           productName: product.name || 'İsimsiz ürün',
           qty,
           colors: usage.map(use => ({name: use.name, grams: Math.round(use.grams * 100) / 100})),
@@ -623,6 +633,13 @@ function handleProduction(productId, quantity, colorUsageMap) {
         if (duplicate) { resolve(logRef.key); return; }
         if (shortage) {
           if (missingProduct) {
+            // Yerelde ürün varken bulut anlık görüntüsü henüz ürünleri içermiyorsa
+            // (ilk bağlantı / sekme uyanması) hemen hata vermek yerine kısa bir
+            // gecikmeyle tekrar denenir. Gerçekten olmayan ürün için yine hata verilir.
+            if (productById(productId) && attempt < TX_MAX_ATTEMPTS - 1) {
+              setTimeout(() => runAttempt(attempt + 1).then(resolve, reject), txRetryDelay(attempt));
+              return;
+            }
             toast('Ürün bulunamadı. Üretim kaydedilmedi.', 'error');
             reject(new Error('missing-product')); return;
           }
@@ -661,7 +678,7 @@ function undoableDelete(type, id, record, ref, label) {
       catch(error){cloudError(error,'kaydı geri yükleme');}
     } else {
       try { await ref.remove(); toast('Kayıt silindi.','success'); }
-      catch(error){pendingDeletes.set(key,pending); if(type==='product')state.products.push({id,...record});else sales.push({id,...record});renderProducts();renderSales();cloudError(error,'kayıt silme');}
+      catch(error){pendingDeletes.set(key,pending); if(type==='product')state.products.push({...record,id});else sales.push({...record,id});renderProducts();renderSales();cloudError(error,'kayıt silme');}
     }
   };
   el.querySelector('.undo-action').addEventListener('click',()=>finish(true));
@@ -893,8 +910,58 @@ function playCostChart(animate) {
 }
 function playPriceBars(animate) { growBars($('priceBars'), '.price-bar-fill', 'height', animate); }
 
+/* ---------- Esnek ürün kimliği çözümleme ----------
+ * Firebase anahtarı ile kayıttaki id alanı eski yedekler, içe aktarılan veriler veya
+ * farklı cihazlardan gelen kayıtlar yüzünden birbirini tutmayabilir. Bu yardımcılar
+ * anahtarı tam, normalize edilmiş (boşluk/büyük-küçük harf bağımsız) ve kayıt içindeki
+ * alternatif id alanları üzerinden bulur. Böylece "Ürün bulunamadı" hatası oluşmaz.
+ */
+function normalizeIdValue(value) {
+  // Kimlikler ASCII tabanlıdır; Türkçe yerel ayarı "I" harfini "ı" yapıp
+  // "ID1" ile "id1" eşleşmesini bozacağı için yerel ayardan bağımsız küçültülür.
+  return String(value ?? '').trim().toLowerCase();
+}
+function normalizeNameValue(value) {
+  return String(value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('tr-TR');
+}
+const ALT_ID_FIELDS = ['cloudKey', 'firebaseKey', 'key', 'productId'];
+function matchProductKey(products, productId, productName) {
+  if (!products || typeof products !== 'object') return null;
+  const wanted = normalizeIdValue(productId);
+  const keys = Object.keys(products);
+  // 1) Firebase anahtarı birebir eşleşiyorsa (büyük/küçük harfe duyarlı) onu kullan.
+  if (wanted && Object.prototype.hasOwnProperty.call(products, productId)) return productId;
+  if (wanted) {
+    // 2) Anahtarın normalize edilmiş hali: "  Abc123 " = "abc123".
+    let key = keys.find(candidate => normalizeIdValue(candidate) === wanted);
+    if (key) return key;
+    // 3) Kaydın içindeki id / alternatif kimlik alanları.
+    key = keys.find(candidate => {
+      const record = products[candidate];
+      if (normalizeIdValue(record?.id) === wanted) return true;
+      return ALT_ID_FIELDS.some(field => normalizeIdValue(record?.[field]) === wanted);
+    });
+    if (key) return key;
+  }
+  // 4) Son çare: benzersiz ürün adı. Aynı ada sahip birden fazla ürün varsa
+  //    yanlış kaydı güncellememek için eşleşme kabul edilmez.
+  const wantedName = normalizeNameValue(productName);
+  if (wantedName) {
+    const matches = keys.filter(candidate => normalizeNameValue(products[candidate]?.name) === wantedName);
+    if (matches.length === 1) return matches[0];
+  }
+  return null;
+}
 function productById(id) {
-  return state.products.find(product => String(product.id) === String(id));
+  const wanted = normalizeIdValue(id);
+  if (!wanted) return undefined;
+  return state.products.find(product => String(product.id) === String(id))
+    || state.products.find(product => normalizeIdValue(product.id) === wanted)
+    || state.products.find(product => ALT_ID_FIELDS.some(field => normalizeIdValue(product[field]) === wanted));
+}
+function sameProductId(a, b) {
+  if (a === undefined || a === null || b === undefined || b === null) return false;
+  return String(a) === String(b) || normalizeIdValue(a) === normalizeIdValue(b);
 }
 /* ---------- Renk yardımcıları ---------- */
 // Firebase dizileri seyrek gelebilir; hem dizi hem nesne biçimini destekle.
@@ -1781,7 +1848,7 @@ function renderProductDetail() {
     ['Birim kâr', money(c.profit)],
     ['Toplam maliyet', money(c.total)]
   ];
-  const productLogs = productionLogs.filter(log => String(log.productId) === String(product.id)).slice(0, 6);
+  const productLogs = productionLogs.filter(log => sameProductId(log.productId, product.id)).slice(0, 6);
   const productionLogHtml = productLogs.length ? `
     <h3 class="detail-section-title">Son üretim kayıtları</h3>
     <div class="production-log-list">${productLogs.map(log => {
@@ -1890,7 +1957,12 @@ const PROD = { productId:null, qty:1, rows:[] };
 function openProductionModal(productId) {
   const product = productById(productId);
   const modal = $('productionModal');
-  if (!product || !modal) return;
+  if (!product) { toast('Ürün bulunamadı. Liste yenileniyor, lütfen tekrar dene.', 'error'); return; }
+  if (!modal) return;
+  // Yerel id artık her zaman gerçek bulut anahtarıdır; yine de boşsa güvenli tarafta kal.
+  if (product.id === undefined || product.id === null || String(product.id) === '') {
+    toast('Ürün kimliği okunamadı. Sayfayı yenileyip tekrar dene.', 'error'); return;
+  }
   PROD.productId = String(product.id);
   PROD.qty = 1;
   const colors = detailColorList(product).filter(color => color.name);
@@ -3265,8 +3337,48 @@ function colorSummary(product) {
   const colors = productColors(product);
   return colors.length ? colors.map(c => `${c.name || 'Renk'} ${c.grams} g`).join(' | ') : 'Renk tanımlanmadı';
 }
-function exportExcel() {
-  if (typeof XLSX === 'undefined') { toast('Excel kütüphanesi yüklenemedi. İnternet bağlantısını kontrol et.', 'error'); return; }
+/* SheetJS (xlsx) yalnızca Excel dışa aktarımında, isteğe bağlı yüklenir.
+ * Öncelik aynı kaynaklı yerel dosyadır: tarayıcı gizlilik/tracking koruması
+ * üçüncü taraf CDN betiklerinin depolama erişimini engellediği için CDN uyarısı
+ * oluşmaz. Yerel dosya yoksa ağ hatasına karşı CDN tek yedek olarak denenir. */
+let xlsxLoadPromise = null;
+function loadXlsxLibrary() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (xlsxLoadPromise) return xlsxLoadPromise;
+  const sources = [
+    'vendor/xlsx.full.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
+  ];
+  xlsxLoadPromise = new Promise((resolve, reject) => {
+    const trySource = index => {
+      if (index >= sources.length) { reject(new Error('xlsx-unavailable')); return; }
+      const script = document.createElement('script');
+      script.src = sources[index];
+      script.async = true;
+      script.referrerPolicy = 'no-referrer';
+      script.onload = () => {
+        if (window.XLSX) { resolve(window.XLSX); return; }
+        script.remove();
+        trySource(index + 1);
+      };
+      script.onerror = () => { script.remove(); trySource(index + 1); };
+      document.head.appendChild(script);
+    };
+    trySource(0);
+  }).catch(error => {
+    xlsxLoadPromise = null;
+    throw error;
+  });
+  return xlsxLoadPromise;
+}
+async function exportExcel() {
+  try {
+    await loadXlsxLibrary();
+  } catch (error) {
+    toast('Excel kütüphanesi yüklenemedi. vendor/xlsx.full.min.js dosyasını veya internet bağlantısını kontrol et.', 'error');
+    return;
+  }
+  if (typeof XLSX === 'undefined') { toast('Excel kütüphanesi yüklenemedi.', 'error'); return; }
   try {
     const wb = XLSX.utils.book_new();
     const addSheet = (name, headers, rows, widths) => {
