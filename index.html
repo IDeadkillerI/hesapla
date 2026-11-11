@@ -11,10 +11,10 @@
   <script>
     (function(){try{
       var t=localStorage.getItem('pc_theme');
-      if(['dark','light','midnight','glass','olive','carbon','indigo','modern-dark','clean-light','forest','midnight-blue','admin-v2','dashboard-v26'].indexOf(t)<0)t='dark';
+      if(['dark','light','midnight','glass','glass-2','lilac-haze','olive','carbon','indigo','modern-dark','clean-light','forest','midnight-blue','admin-v2','dashboard-v26'].indexOf(t)<0)t='dark';
       document.documentElement.setAttribute('data-theme',t);
       var m=document.querySelector('meta[name="theme-color"]');
-      if(m)m.setAttribute('content',{dark:'#09090b',light:'#f4f5f7',midnight:'#050b1a',glass:'#0b1030',olive:'#0b0e08',carbon:'#070707',indigo:'#0d0f18','modern-dark':'#08090d','clean-light':'#f7f8fa',forest:'#07130f','midnight-blue':'#050b1a','admin-v2':'#0b1329','dashboard-v26':'#f8fafc'}[t]);
+      if(m)m.setAttribute('content',{dark:'#09090b',light:'#f4f5f7',midnight:'#050b1a',glass:'#0b1030','glass-2':'#0e0f11','lilac-haze':'#1e1c24',olive:'#0b0e08',carbon:'#070707',indigo:'#0d0f18','modern-dark':'#08090d','clean-light':'#f7f8fa',forest:'#07130f','midnight-blue':'#050b1a','admin-v2':'#0b1329','dashboard-v26':'#f8fafc'}[t]);
       if(localStorage.getItem('pc_sidebar')==='collapsed')document.documentElement.setAttribute('data-sb','collapsed');
     }catch(e){document.documentElement.setAttribute('data-theme','dark')}})();
   </script>
@@ -77,6 +77,7 @@
             <button class="theme-option" type="button" role="radio" data-theme-choice="light" aria-checked="false"><span class="theme-swatch" data-t="light"></span><span><b>Açık</b><small>Ferah beyaz ve gri tonlar</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
             <button class="theme-option" type="button" role="radio" data-theme-choice="midnight" aria-checked="false"><span class="theme-swatch" data-t="midnight"></span><span><b>Gece mavisi</b><small>Yüksek kontrast · camgöbeği vurgu</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
             <button class="theme-option" type="button" role="radio" data-theme-choice="glass" aria-checked="false"><span class="theme-swatch" data-t="glass"></span><span><b>Glass</b><small>Cam efekti · bulanık arka plan</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
+            <button class="theme-option" type="button" role="radio" data-theme-choice="glass-2" aria-checked="false"><span class="theme-swatch" data-t="glass-2"></span><span><b>Glass II · Kristal</b><small>Nötr cam · mavi ve mor yok</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
             <p class="theme-menu-title">PROFESYONEL PALETLER</p>
             <button class="theme-option" type="button" role="radio" data-theme-choice="modern-dark" aria-checked="false"><span class="theme-swatch" data-t="modern-dark"></span><span><b>Modern Dark</b><small>Derin antrasit · yumuşak gölgeler</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
             <button class="theme-option" type="button" role="radio" data-theme-choice="clean-light" aria-checked="false"><span class="theme-swatch" data-t="clean-light"></span><span><b>Clean Light</b><small>Minimalist beyaz · açık gri paneller</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
@@ -88,6 +89,7 @@
             <button class="theme-option" type="button" role="radio" data-theme-choice="olive" aria-checked="false"><span class="theme-swatch" data-t="olive"></span><span><b>Mat zeytin</b><small>Toprak yeşili · sakin ve mat</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
             <button class="theme-option" type="button" role="radio" data-theme-choice="carbon" aria-checked="false"><span class="theme-swatch" data-t="carbon"></span><span><b>Karbon &amp; neon</b><small>Siyah karbon · neon turuncu</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
             <button class="theme-option" type="button" role="radio" data-theme-choice="indigo" aria-checked="false"><span class="theme-swatch" data-t="indigo"></span><span><b>Slate &amp; indigo</b><small>Arduvaz gri · mor vurgu</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
+            <button class="theme-option" type="button" role="radio" data-theme-choice="lilac-haze" aria-checked="false"><span class="theme-swatch" data-t="lilac-haze"></span><span><b>Lilac Haze</b><small>Lila %60 · grafit gece %30 · asit yeşili %10</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
           </div>
         </div>
       </div>
@@ -251,14 +253,14 @@
             <article><span>Darboğaz ürün</span><strong id="stockBottleneck">—</strong><small id="stockBottleneckNote">Stok sınırı</small></article>
           </div>
           <div class="color-stock-head">
-            <div><h3>Renk bazlı stok</h3><p class="muted">Her rengin stokta kalan miktarı. Kilogram alanını düzenleyerek güncelleyebilir, çöp kutusuyla rengi kaldırabilirsin.</p></div>
+            <div><h3>Renk bazlı stok</h3><p class="muted">Her rengin stokta kalan miktarı. Bu tablo salt okunurdur; stok miktarı yalnızca Bakım &amp; Gider sekmesindeki filament alımı ve üretim kayıtlarıyla değişir.</p></div>
             <span class="tag" id="colorStockTag">0 renk</span>
           </div>
           <div class="table-wrap"><table class="stock-table color-stock-table">
-            <thead><tr><th>Renk</th><th>Stokta</th><th>Ağırlıklı ort. fiyat</th><th>Plan için gerekli</th><th>Kalan</th><th>Durum</th><th></th></tr></thead>
+            <thead><tr><th>Renk</th><th>Stokta</th><th>Ağırlıklı ort. fiyat</th><th>Plan için gerekli</th><th>Kalan</th><th>Durum</th></tr></thead>
             <tbody id="colorStockRows"></tbody>
           </table></div>
-          <div id="colorStockEmpty" class="empty-state">Henüz renk stoğu yok. Aşağıdaki alım formundan renk adı ve miktar girerek ilk stoğu ekle.</div>
+          <div id="colorStockEmpty" class="empty-state">Henüz renk stoğu yok. Bakım &amp; Gider sekmesindeki filament alım formundan renk adı ve miktar girerek ilk stoğu ekle.</div>
           <div class="color-stock-head">
             <div><h3>Ürünlere göre üretim kapasitesi</h3><p class="muted">Planlanan adetler için gereken renk miktarları ve stokla basılabilecek adet.</p></div>
           </div>
@@ -268,53 +270,7 @@
             <tbody id="stockRows"></tbody>
           </table></div>
           <div id="stockEmpty" class="empty-state">Henüz ürün yok. Ürünler sayfasından ürün ekleyebilirsin.</div>
-          <div class="stock-buy">
-            <h3>Stok girişi / filament alımı</h3>
-            <p class="muted">Rengi, miktarı ve fiyatı gir. Aynı renk tekrar girilirse mevcut stoğun üzerine eklenir. Fiyat güncel fiyattan farklıysa enflasyon takipçisine otomatik kaydedilir.</p>
-            <form id="stockForm" class="sales-form stock-entry-form">
-              <label class="field"><span>Renk</span><input id="stockAddColor" type="text" list="stockColorList" maxlength="24" placeholder="Örn. Siyah" autocomplete="off" required></label>
-              <label class="field"><span>Alınan miktar (kg)</span><input id="stockAddKg" type="number" min="0.01" max="100000" step="0.01" value="1" required></label>
-              <label class="field"><span>Alım fiyatı (TL / kg)</span><input id="stockAddPrice" type="number" min="0.01" max="1000000" step="0.01" value="700" required></label>
-              <label class="field"><span>Alım tarihi</span><input id="stockAddDate" type="date" required></label>
-              <button class="btn btn-primary" type="submit"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Stoğa ekle</button>
-            </form>
-            <p class="muted stock-total-preview" id="stockAddTotal" aria-live="polite"></p>
-            <datalist id="stockColorList"></datalist>
-          </div>
-          <div class="stock-buy purchase-history">
-            <div class="color-stock-head">
-              <div><h3>Filament alım giderleri</h3><p class="muted">Her stok girişi gider olarak kaydedilir. Alımı geri alırsan stok düşülür ve gider kalkar.</p></div>
-              <span class="tag" id="purchaseCount">0 alım kaydı</span>
-            </div>
-            <div class="stock-cards purchase-cards">
-              <article><span>Toplam filament gideri</span><strong id="purchaseTotalAll">₺0,00</strong><small>Tüm alımlar</small></article>
-              <article><span>Toplam alınan filament</span><strong id="purchaseTotalKg">0 kg</strong><small>Tüm alımlar</small></article>
-            </div>
-            <div class="table-wrap"><table class="history-table purchase-table">
-              <thead><tr><th>Tarih</th><th>Renk</th><th>Miktar</th><th>Birim fiyat</th><th>Gider</th><th></th></tr></thead>
-              <tbody id="purchaseRows"></tbody>
-            </table></div>
-            <div id="purchaseEmpty" class="empty-state">Henüz filament alımı yok. Yukarıdaki formdan alım girdiğinde burada görünür.</div>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="section-heading">
-            <div><p class="eyebrow">05 / ENFLASYON</p><h2>Hammadde maliyet enflasyonu</h2><p class="muted">Filament alım fiyatların zaman içinde nasıl değişti ve aynı üretim planını nasıl etkiledi?</p></div>
-            <span class="tag">Canlı fiyat geçmişi</span>
-          </div>
-          <div class="stock-cards inflation-cards">
-            <article><span>İlk kayıtlı fiyat</span><strong id="inflFirst">—</strong><small id="inflFirstDate">Kayıt yok</small></article>
-            <article><span>Güncel fiyat</span><strong id="inflCurrent">—</strong><small>TL / kg</small></article>
-            <article><span>Değişim</span><strong id="inflChange">—</strong><small id="inflChangeNote">İlk kayda göre</small></article>
-            <article><span>Plan maliyet etkisi</span><strong id="inflImpact">—</strong><small>Mevcut üretim planında</small></article>
-          </div>
-          <div class="price-bars" id="priceBars"></div>
-          <div class="table-wrap"><table class="history-table">
-            <thead><tr><th>Tarih</th><th>Kaynak</th><th>Önceki fiyat</th><th>Yeni fiyat</th><th>Değişim</th><th>Not</th></tr></thead>
-            <tbody id="inflationRows"></tbody>
-          </table></div>
-          <div id="inflationEmpty" class="empty-state">Henüz fiyat kaydı yok. Stok girişi yaparak veya filament fiyatını değiştirerek geçmiş oluşturabilirsin.</div>
+          <p class="note">Filament stok miktarı bu bölümden değiştirilemez. Stok artışı yalnızca <strong>Bakım &amp; Gider</strong> sekmesindeki filament alımı formuyla, stok düşüşü ise üretim kayıtlarıyla yapılır.</p>
         </section>
       </section>
 
@@ -322,7 +278,7 @@
         <div class="section-heading"><div><p class="eyebrow">05 / DETAYLI ANALİZ</p><h2>Maliyet analizi</h2><p class="muted">Maliyet dağılımı ve hesaplama açıklamaları bu ayrı bölümde yer alır.</p></div><span class="tag">Canlı analiz</span></div>
         <div class="analysis-grid">
           <article class="panel chart-panel"><div class="section-heading"><div><p class="eyebrow">GİDERLER</p><h2>Maliyet dağılımı</h2></div></div><div class="cost-visual"><div id="costDonut" class="cost-donut"><div class="donut-center"><strong id="costGrandTotal">₺0,00</strong><span>Toplam maliyet</span></div></div><div id="costBreakdown" class="breakdown"></div></div></article>
-          <article class="panel tips-panel"><div class="section-heading"><div><p class="eyebrow">BİLGİ</p><h2>Hesaplama notları</h2></div><span class="stat-icon green"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span></div><ul><li>Filament maliyeti, üründe tanımlı renklerin gram/adet toplamı üzerinden hesaplanır. Renk tanımlanmamış ürünlerde toplam gram ÷ adet değeri kullanılır.</li><li>Elektrik maliyeti adet başına <strong>(baskı süresi ÷ adet) × (yazıcı gücü ÷ 1000) × kWh fiyatı</strong> olarak hesaplanır; toplam sürenin adede düşen payı esas alınır.</li><li>Amortisman adet başına <strong>(baskı süresi ÷ adet) × (yazıcı bedeli ÷ beklenen ömür)</strong>, aşınma ise <strong>(baskı süresi ÷ adet) × bakım fonu</strong> formülüyle hesaplanır. Bakım fonu nozzle, PTFE, PEI, ekstruder dişlisi ve fan giderlerini kapsar. Baskı süresi girilmeyen ürünlerde bu üç kalem sıfırdır.</li><li>Fire payı, başarısız baskılar için filament, stand ve enerji maliyetinin üzerine <strong>(1 + fire oranı)</strong> çarpanıyla eklenir.</li><li>Stand maliyeti, stand filamentinin toplam maliyetinin ilgili ürün adedine bölünmesiyle hesaplanır.</li><li>Çakmak maliyeti, hedef üretim adedine bölünerek tüm ürünlere uygulanır.</li><li>Envanter sayfası, her rengin deposunda kalan miktarı ayrı gösterir. Ürünlerin renk gramlarına göre stokla kaç adet basılabileceği fire dahil hesaplanır; stok girişleri ve fiyat değişimleri enflasyon takipçisine işlenir.</li>
+          <article class="panel tips-panel"><div class="section-heading"><div><p class="eyebrow">BİLGİ</p><h2>Hesaplama notları</h2></div><span class="stat-icon green"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span></div><ul><li>Filament maliyeti, üründe tanımlı renklerin gram/adet toplamı üzerinden hesaplanır. Renk tanımlanmamış ürünlerde toplam gram ÷ adet değeri kullanılır.</li><li>Elektrik maliyeti adet başına <strong>(baskı süresi ÷ adet) × (yazıcı gücü ÷ 1000) × kWh fiyatı</strong> olarak hesaplanır; toplam sürenin adede düşen payı esas alınır.</li><li>Amortisman adet başına <strong>(baskı süresi ÷ adet) × (yazıcı bedeli ÷ beklenen ömür)</strong>, aşınma ise <strong>(baskı süresi ÷ adet) × bakım fonu</strong> formülüyle hesaplanır. Bakım fonu nozzle, PTFE, PEI, ekstruder dişlisi ve fan giderlerini kapsar. Baskı süresi girilmeyen ürünlerde bu üç kalem sıfırdır.</li><li>Fire payı, başarısız baskılar için filament, stand ve enerji maliyetinin üzerine <strong>(1 + fire oranı)</strong> çarpanıyla eklenir.</li><li>Stand maliyeti, stand filamentinin toplam maliyetinin ilgili ürün adedine bölünmesiyle hesaplanır.</li><li>Çakmak maliyeti, hedef üretim adedine bölünerek tüm ürünlere uygulanır.</li><li>Envanter sayfası, her rengin deposunda kalan miktarı ayrı gösterir ve salt okunurdur. Ürünlerin renk gramlarına göre stokla kaç adet basılabileceği fire dahil hesaplanır; stok girişleri, filament alım giderleri ve fiyat değişimleri Bakım &amp; Gider sekmesinde takip edilir.</li>
 <li>Bir ürünün fotoğrafına veya satırına tıklandığında ürün detayı açılır; o üründe kullanılan renkler, her renkten kaç gram kullanıldığı ve büyük ürün fotoğrafı görüntülenir.</li><li>Satış kaydında ciro, maliyet ve kâr saklanır; haftalık ve aylık özetler seçilen döneme göre güncellenir.</li></ul><p class="note">Tüm ürünler, satışlar, maliyet parametreleri ve fiyat geçmişi Google Firebase Realtime Database'de saklanır. Başka bir cihazdan veya mobil veriyle girdiğinde aynı veriler onValue dinleyicisiyle anlık olarak yüklenir; tarayıcı hafızası kullanılmaz.</p></article>
         </div>
       </section>
@@ -365,6 +321,56 @@
             <tbody id="maintenanceRows"></tbody>
           </table></div>
           <div id="maintenanceEmpty" class="empty-state">Henüz gerçek bakım masrafı girilmedi. İlk masrafını yukarıdaki formdan ekleyebilirsin.</div>
+        </section>
+        <section class="panel">
+          <div class="section-heading">
+            <div><p class="eyebrow">FİLAMENT ALIMI</p><h2>Stok girişi / filament alımı</h2><p class="muted">Rengi, miktarı ve fiyatı gir. Aynı renk tekrar girilirse mevcut stoğun üzerine eklenir. Fiyat güncel fiyattan farklıysa enflasyon takipçisine otomatik kaydedilir.</p></div>
+            <span class="tag">Gider kaydı</span>
+          </div>
+          <div class="stock-buy">
+            <form id="stockForm" class="sales-form stock-entry-form">
+              <label class="field"><span>Renk</span><input id="stockAddColor" type="text" list="stockColorList" maxlength="24" placeholder="Örn. Siyah" autocomplete="off" required></label>
+              <label class="field"><span>Alınan miktar (kg)</span><input id="stockAddKg" type="number" min="0.01" max="100000" step="0.01" value="1" required></label>
+              <label class="field"><span>Alım fiyatı (TL / kg)</span><input id="stockAddPrice" type="number" min="0.01" max="1000000" step="0.01" value="700" required></label>
+              <label class="field"><span>Alım tarihi</span><input id="stockAddDate" type="date" required></label>
+              <button class="btn btn-primary" type="submit"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Stoğa ekle</button>
+            </form>
+            <p class="muted stock-total-preview" id="stockAddTotal" aria-live="polite"></p>
+            <datalist id="stockColorList"></datalist>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="color-stock-head">
+            <div><h3>Filament alım giderleri</h3><p class="muted">Her stok girişi gider olarak kaydedilir. Alımı geri alırsan stok düşülür ve gider kalkar.</p></div>
+            <span class="tag" id="purchaseCount">0 alım kaydı</span>
+          </div>
+          <div class="stock-cards purchase-cards">
+            <article><span>Toplam filament gideri</span><strong id="purchaseTotalAll">₺0,00</strong><small>Tüm alımlar</small></article>
+            <article><span>Toplam alınan filament</span><strong id="purchaseTotalKg">0 kg</strong><small>Tüm alımlar</small></article>
+          </div>
+          <div class="table-wrap"><table class="history-table purchase-table">
+            <thead><tr><th>Tarih</th><th>Renk</th><th>Miktar</th><th>Birim fiyat</th><th>Gider</th><th></th></tr></thead>
+            <tbody id="purchaseRows"></tbody>
+          </table></div>
+          <div id="purchaseEmpty" class="empty-state">Henüz filament alımı yok. Yukarıdaki formdan alım girdiğinde burada görünür.</div>
+        </section>
+        <section class="panel">
+          <div class="section-heading">
+            <div><p class="eyebrow">ENFLASYON</p><h2>Hammadde maliyet enflasyonu</h2><p class="muted">Filament alım fiyatların zaman içinde nasıl değişti ve aynı üretim planını nasıl etkiledi?</p></div>
+            <span class="tag">Canlı fiyat geçmişi</span>
+          </div>
+          <div class="stock-cards inflation-cards">
+            <article><span>İlk kayıtlı fiyat</span><strong id="inflFirst">—</strong><small id="inflFirstDate">Kayıt yok</small></article>
+            <article><span>Güncel fiyat</span><strong id="inflCurrent">—</strong><small>TL / kg</small></article>
+            <article><span>Değişim</span><strong id="inflChange">—</strong><small id="inflChangeNote">İlk kayda göre</small></article>
+            <article><span>Plan maliyet etkisi</span><strong id="inflImpact">—</strong><small>Mevcut üretim planında</small></article>
+          </div>
+          <div class="price-bars" id="priceBars"></div>
+          <div class="table-wrap"><table class="history-table">
+            <thead><tr><th>Tarih</th><th>Kaynak</th><th>Önceki fiyat</th><th>Yeni fiyat</th><th>Değişim</th><th>Not</th></tr></thead>
+            <tbody id="inflationRows"></tbody>
+          </table></div>
+          <div id="inflationEmpty" class="empty-state">Henüz fiyat kaydı yok. Stok girişi yaparak veya filament fiyatını değiştirerek geçmiş oluşturabilirsin.</div>
         </section>
       </section>
 
@@ -505,6 +511,10 @@
       <span class="confirm-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.8 12h9.4l.8-12M10 11v5M14 11v5"/></svg></span>
       <h3 id="confirmTitle">Emin misin?</h3>
       <p id="confirmMessage"></p>
+      <div class="confirm-password" id="confirmPasswordWrap" hidden>
+        <label class="field"><span>Admin şifresi</span><input id="confirmPassword" type="password" autocomplete="current-password" placeholder="Platforma giriş şifresi"></label>
+        <p class="confirm-password-error" id="confirmPasswordError" role="alert" hidden></p>
+      </div>
       <div class="confirm-actions">
         <button class="btn btn-ghost" id="confirmCancel" type="button">Vazgeç</button>
         <button class="btn btn-primary" id="confirmOk" type="button">Onayla</button>
@@ -518,6 +528,6 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
   <script src="firebase-config.js"></script>
   <!-- Sürüm parametresi, tarayıcının eski script.js önbelleğini kullanmasını engeller. -->
-  <script src="script.js?v=20261110-2"></script>
+  <script src="script.js?v=20261111-1"></script>
 </body>
 </html>

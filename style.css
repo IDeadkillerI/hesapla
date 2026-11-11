@@ -283,7 +283,7 @@ svg{display:block}
   backdrop-filter:blur(18px) saturate(125%);
   -webkit-backdrop-filter:blur(18px) saturate(125%);
 }
-.production-page>.panel,.inventory-page>.panel{margin-bottom:18px}
+.production-page>.panel,.inventory-page>.panel,.maintenance-page>.panel{margin-bottom:18px}
 .analysis-grid .panel{margin-bottom:0}
 
 .section-heading{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:22px}
@@ -2331,3 +2331,184 @@ input.is-invalid:focus{outline:none}
   .production-undo-btn{grid-column:1 / -1;justify-self:start}
   .production-log-colors{grid-column:1 / -1;white-space:normal}
 }
+
+/* =========================================================
+   GLASS II · Kristal — nötr, mavi/mor içermeyen gerçek cam
+   Dumanlı grafit zemin + beyaz/kırık beyaz ışık kütleleri
+   ========================================================= */
+:root[data-theme="glass-2"]{
+  color-scheme:dark;
+  --glass2-image:
+    radial-gradient(48% 44% at 12% 8%, rgba(255,255,255,.50), transparent 72%),
+    radial-gradient(42% 42% at 88% 12%, rgba(214,211,205,.40), transparent 72%),
+    radial-gradient(46% 46% at 82% 90%, rgba(255,255,255,.30), transparent 72%),
+    radial-gradient(44% 44% at 8% 88%, rgba(154,152,148,.40), transparent 74%),
+    radial-gradient(34% 34% at 52% 46%, rgba(236,232,225,.20), transparent 76%);
+  --bg:#0e0f11; --bg-soft:#141518;
+  --surface:rgba(255,255,255,.065);
+  --surface-2:rgba(255,255,255,.045);
+  --surface-solid:rgba(30,31,34,.74);
+  --line:rgba(255,255,255,.16); --line-strong:rgba(255,255,255,.32);
+  --text:#f6f6f5; --text-2:#e4e4e1; --muted:#b9b9b5; --muted-2:#94948f;
+  --amber:#e7e3da; --amber-strong:#d8d3c8; --amber-soft:rgba(231,227,218,.14);
+  --emerald:#5ff2c0; --emerald-soft:rgba(95,242,192,.16);
+  --rose:#ff9aab; --rose-soft:rgba(255,154,171,.16);
+  --orange:#ffc98a; --sky:#d7dcdf; --sky-soft:rgba(215,220,223,.12);
+  --shadow-panel:0 1px 0 rgba(255,255,255,.36) inset, 0 -1px 0 rgba(255,255,255,.04) inset, 0 26px 60px -26px rgba(0,0,0,.8);
+  --glow-amber:0 12px 32px -14px rgba(231,227,218,.55);
+  --ov:255,255,255; --ink:14,15,17; --accent-rgb:231,227,218;
+  --ac-1:#fbfaf7; --ac-2:#e2ded5; --ac-3:#c9c4b9;
+  --text-strong:#ffffff; --amber-text:#f2efe8; --nav-active-text:#ffffff;
+  --solid:rgba(33,34,38,.84); --solid-2:rgba(24,25,28,.78); --solid-3:rgba(45,46,50,.82);
+  --card-tint:rgba(255,255,255,.07);
+  --sidebar-bg:linear-gradient(180deg,rgba(255,255,255,.09),rgba(255,255,255,.03));
+  --sidebar-bg-mobile:rgba(26,27,30,.84);
+  --modal-bg:linear-gradient(160deg,rgba(70,71,76,.72),rgba(24,25,28,.88));
+  --toast-bg:rgba(34,35,39,.84); --util-bg:rgba(255,255,255,.05);
+}
+:root[data-theme="glass-2"] body{
+  background-color:#0e0f11;
+  background-image:none;
+}
+:root[data-theme="glass-2"] body::before{
+  content:"";position:fixed;inset:-12%;z-index:0;pointer-events:none;
+  background:var(--glass2-image);
+  filter:blur(44px) saturate(88%);
+  animation:glassDrift 42s ease-in-out infinite alternate;
+}
+:root[data-theme="glass-2"] .app-shell{position:relative;z-index:1}
+:root[data-theme="glass-2"] .btn-primary{color:#15161a}
+:root[data-theme="glass-2"] ::selection{background:rgba(231,227,218,.34);color:#0e0f11}
+:root[data-theme="glass-2"] :is(.panel,.stat-card,.sidebar,.utilbar,.detail-modal,.confirm-card,.login-card,.theme-menu,.toast){
+  background:linear-gradient(135deg,rgba(255,255,255,.15),rgba(255,255,255,.035) 58%),var(--surface);
+  border:1px solid rgba(255,255,255,.19);
+  border-top-color:rgba(255,255,255,.44);
+  border-left-color:rgba(255,255,255,.28);
+  backdrop-filter:blur(26px) saturate(120%);
+  -webkit-backdrop-filter:blur(26px) saturate(120%);
+}
+:root[data-theme="glass-2"] .stat-card{background:linear-gradient(135deg,rgba(255,255,255,.16),rgba(255,255,255,.035) 60%),var(--card-tint)}
+:root[data-theme="glass-2"] .sidebar{border-radius:0;border-width:0 1px 0 0;border-right-color:rgba(255,255,255,.2)}
+:root[data-theme="glass-2"] .utilbar{border-width:0 0 1px;border-bottom-color:rgba(255,255,255,.18)}
+:root[data-theme="glass-2"] :is(.detail-modal,.theme-menu,.confirm-card){
+  background:linear-gradient(160deg,rgba(255,255,255,.18),rgba(255,255,255,.04) 55%),var(--modal-bg);
+}
+:root[data-theme="glass-2"] .login-overlay{
+  background:rgba(12,13,15,.42);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+}
+:root[data-theme="glass-2"] .modal-backdrop,
+:root[data-theme="glass-2"] .confirm-backdrop{background:rgba(10,11,13,.48)}
+:root[data-theme="glass-2"] :is(.sales-form,.sales-stats article,.stock-cards article,.sales-chart,.detail-item,.formula-strip span,.pkg-summary-grid article){
+  background:rgba(255,255,255,.05);
+  border-color:rgba(255,255,255,.16);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.13);
+}
+:root[data-theme="glass-2"] .table-wrap{background:rgba(16,17,20,.30);border-color:rgba(255,255,255,.16)}
+:root[data-theme="glass-2"] .table-wrap table{background:transparent}
+:root[data-theme="glass-2"] th{background:rgba(255,255,255,.05);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+:root[data-theme="glass-2"] tbody tr:hover{background:rgba(255,255,255,.045)}
+:root[data-theme="glass-2"] .sidebar nav a.active{
+  background:linear-gradient(135deg,rgba(255,255,255,.18),rgba(255,255,255,.05));
+  border-color:rgba(255,255,255,.28);
+  box-shadow:inset 2px 0 0 rgba(255,255,255,.75),inset 0 1px 0 rgba(255,255,255,.3),0 10px 24px -14px rgba(0,0,0,.7);
+}
+:root[data-theme="glass-2"] .sidebar nav a.active .icon{color:#ffffff}
+:root[data-theme="glass-2"] :is(input,select,textarea):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not(.input-wrap input):not(.searchbox input){
+  background-color:rgba(255,255,255,.06);
+}
+:root[data-theme="glass-2"] :is(.input-wrap,.searchbox){background:rgba(255,255,255,.065)}
+:root[data-theme="glass-2"] :is(.input-wrap,.searchbox) input{background:transparent}
+.theme-swatch[data-t="glass-2"]{background:linear-gradient(135deg,#f6f5f2,#c9c7c1 45%,#5c5c60 78%,#1d1d20)}
+.theme-swatch[data-t="glass-2"]::after{background:#ffffff;box-shadow:0 0 0 2px rgba(255,255,255,.32)}
+@media (prefers-reduced-motion:reduce){:root[data-theme="glass-2"] body::before{animation:none}}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  :root[data-theme="glass-2"] :is(.panel,.stat-card,.sidebar,.utilbar,.detail-modal,.confirm-card,.login-card,.theme-menu,.toast){background:var(--solid)}
+}
+
+/* =========================================================
+   LILAC HAZE — %60 lila pus · %30 grafit gece · %10 asit yeşili
+   ========================================================= */
+:root[data-theme="lilac-haze"]{
+  color-scheme:dark;
+  --bg:#1e1c24; --bg-soft:#25222d;
+  --surface:rgba(199,179,232,.075);
+  --surface-2:rgba(199,179,232,.045);
+  --surface-solid:#2a2732;
+  --line:rgba(199,179,232,.14); --line-strong:rgba(199,179,232,.28);
+  --text:#f4eff9; --text-2:#ded5ea; --muted:#b3a8c4; --muted-2:#8d829f;
+  --amber:#c7b3e8; --amber-strong:#b39ddb; --amber-soft:rgba(199,179,232,.15);
+  --emerald:#a3e635; --emerald-soft:rgba(163,230,53,.13);
+  --rose:#fb7185; --rose-soft:rgba(251,113,133,.13);
+  --orange:#e9d5ff; --sky:#c6f432; --sky-soft:rgba(198,244,50,.12);
+  --shadow-panel:0 1px 0 rgba(255,255,255,.05) inset,0 30px 60px -40px rgba(0,0,0,.8);
+  --glow-amber:0 12px 32px -14px rgba(199,179,232,.55);
+  --ov:244,239,249; --ink:20,18,26; --accent-rgb:199,179,232;
+  --ac-1:#e6d8f7; --ac-2:#c7b3e8; --ac-3:#a98fd6;
+  --text-strong:#ffffff; --amber-text:#e5d9f7; --nav-active-text:#f4eff9;
+  --solid:#2a2732; --solid-2:#221f29; --solid-3:#332f3d;
+  --card-tint:rgba(199,179,232,.08);
+  --sidebar-bg:linear-gradient(180deg,rgba(44,40,53,.97),rgba(24,22,30,.98));
+  --sidebar-bg-mobile:rgba(30,27,37,.97);
+  --modal-bg:linear-gradient(160deg,#36313f,#201d27);
+  --toast-bg:rgba(40,36,49,.97); --util-bg:rgba(30,28,36,.86);
+}
+:root[data-theme="lilac-haze"] body{
+  background-color:#1e1c24;
+  background-image:
+    radial-gradient(950px 620px at 84% -10%,rgba(199,179,232,.20),transparent 62%),
+    radial-gradient(780px 580px at -6% 22%,rgba(199,179,232,.10),transparent 62%),
+    radial-gradient(640px 500px at 52% 116%,rgba(198,244,50,.065),transparent 66%);
+  background-size:auto;
+}
+:root[data-theme="lilac-haze"] .btn-primary{color:#201d27}
+:root[data-theme="lilac-haze"] .brand-icon{background:linear-gradient(145deg,#e6d8f7,#c7b3e8 58%,#c6f432);color:#1b1920}
+:root[data-theme="lilac-haze"] ::selection{background:rgba(198,244,50,.28);color:#141318}
+:root[data-theme="lilac-haze"] .theme-menu,
+:root[data-theme="lilac-haze"] :is(.panel,.stat-card){background:linear-gradient(160deg,rgba(199,179,232,.10),rgba(199,179,232,.03) 62%),var(--surface-solid)}
+:root[data-theme="lilac-haze"] :is(.detail-modal,.confirm-card,.login-card,.toast,.theme-menu){background:var(--modal-bg);border-color:var(--line-strong)}
+:root[data-theme="lilac-haze"] .table-wrap{background:rgba(24,22,30,.55);border-color:var(--line)}
+:root[data-theme="lilac-haze"] th{background:rgba(199,179,232,.07);color:var(--muted)}
+:root[data-theme="lilac-haze"] tbody tr:hover{background:rgba(199,179,232,.055)}
+:root[data-theme="lilac-haze"] .sidebar nav a.active{
+  background:linear-gradient(90deg,rgba(199,179,232,.20),rgba(199,179,232,.03));
+  border-color:rgba(199,179,232,.26);
+  box-shadow:inset 2px 0 0 var(--amber);
+}
+:root[data-theme="lilac-haze"] .tag::before,
+:root[data-theme="lilac-haze"] .pulse{background:#c6f432;box-shadow:0 0 0 3px rgba(198,244,50,.14)}
+:root[data-theme="lilac-haze"] :is(.input-wrap,.searchbox){background:rgba(199,179,232,.06)}
+:root[data-theme="lilac-haze"] :is(input,select,textarea):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not(.input-wrap input):not(.searchbox input){background-color:rgba(199,179,232,.055)}
+.theme-swatch[data-t="lilac-haze"]{background:linear-gradient(135deg,#c7b3e8 0 58%,#2a2732 58% 86%,#c6f432 86%)}
+.theme-swatch[data-t="lilac-haze"]::after{background:#c6f432;box-shadow:0 0 0 2px rgba(198,244,50,.25)}
+
+/* ---------- Salt okunur renk stoğu ---------- */
+.stock-readonly-cell strong{font-variant-numeric:tabular-nums;color:var(--text-strong)}
+.stock-readonly-cell small{font-weight:500}
+.color-stock-table td.stock-readonly-cell{white-space:nowrap}
+
+/* ---------- Satış satırı eylemleri / yeniden satış ---------- */
+.sale-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.resell-btn{border-color:rgba(52,211,153,.38);color:var(--emerald);background:var(--emerald-soft)}
+.resell-btn:hover{background:rgba(52,211,153,.20);border-color:rgba(52,211,153,.55);color:var(--text-strong)}
+#packageForm.is-editing{animation:repackagePulse 1.5s ease-out 1}
+@keyframes repackagePulse{
+  0%{box-shadow:0 0 0 0 rgba(52,211,153,.45)}
+  45%{box-shadow:0 0 0 8px rgba(52,211,153,0)}
+  100%{box-shadow:0 0 0 0 rgba(52,211,153,0)}
+}
+@media (max-width:767px){.sale-actions{justify-content:flex-end;width:100%}}
+
+/* ---------- Onay penceresinde admin şifresi ---------- */
+.confirm-password{margin-top:14px;display:grid;gap:8px;text-align:left}
+.confirm-password[hidden]{display:none}
+.confirm-password .field{display:grid;gap:6px}
+.confirm-password .field>span{font-size:11px;font-weight:700;letter-spacing:.02em;color:var(--muted)}
+.confirm-card .confirm-password input{
+  width:100%;min-height:44px;padding:0 12px;
+  border:1px solid var(--line-strong);border-radius:var(--r-md);
+  background:rgba(var(--ov),.045);color:var(--text);
+  font-family:var(--font-ui);
+}
+.confirm-card .confirm-password input:focus-visible{outline:2px solid rgba(var(--accent-rgb),.55);outline-offset:1px}
+.confirm-card p.confirm-password-error{margin:0;color:var(--rose);font-size:12px;font-weight:600;line-height:1.4}

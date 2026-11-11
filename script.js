@@ -28,7 +28,7 @@ function showPage(pageId) {
   // Sayfaya her girişte grafikler sıfırdan dolar.
   if (pageId === 'analysis' && typeof playCostChart === 'function') playCostChart(true);
   requestAnimationFrame(syncSlidingPills);
-  if (pageId === 'inventory' && typeof playPriceBars === 'function') playPriceBars(true);
+  if (pageId === 'maintenance' && typeof playPriceBars === 'function') playPriceBars(true);
   if (pageId === 'sales' && typeof playSalesChart === 'function') playSalesChart(true);
 }
 document.querySelectorAll('.sidebar nav a[data-page]').forEach(link => {
@@ -1076,36 +1076,77 @@ function toast(message, kind, opts) {
   arm();
 }
 function confirmDialog(options) {
-  const o = Object.assign({ title:'Emin misin?', message:'', confirmText:'Onayla', cancelText:'Vazgeç', danger:false }, options);
+  const o = Object.assign({ title:'Emin misin?', message:'', confirmText:'Onayla', cancelText:'Vazgeç', danger:false, requirePassword:false }, options);
   return new Promise(resolve => {
     const modal = $('confirmModal'), ok = $('confirmOk'), cancel = $('confirmCancel');
     if (!modal) { resolve(false); return; }
     const previous = document.activeElement;
+    const passWrap = $('confirmPasswordWrap'), passInput = $('confirmPassword'), passError = $('confirmPasswordError');
     $('confirmTitle').textContent = o.title;
     $('confirmMessage').textContent = o.message;
     ok.textContent = o.confirmText; cancel.textContent = o.cancelText;
     modal.classList.toggle('is-danger', !!o.danger);
+    if (passWrap) passWrap.hidden = !o.requirePassword;
+    if (o.requirePassword && passInput) {
+      passInput.value = '';
+      if (passError) { passError.hidden = true; passError.textContent = ''; }
+    }
     modal.hidden = false;
-    (o.danger ? cancel : ok).focus();
+    if (o.requirePassword && passInput) passInput.focus();
+    else (o.danger ? cancel : ok).focus();
+    let closed = false;
     const finish = result => {
+      if (closed) return;
+      closed = true;
       modal.hidden = true;
       document.removeEventListener('keydown', onKey, true);
       modal.removeEventListener('mousedown', onBackdrop);
+      if (passInput) passInput.onkeydown = null;
       ok.onclick = cancel.onclick = null;
       if (previous && previous.focus) previous.focus();
       resolve(result);
     };
+    const focusables = () => [passInput, cancel, ok].filter(el => el && !el.closest('[hidden]'));
     const onKey = event => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); finish(false); }
       else if (event.key === 'Tab') {
         event.preventDefault();
-        (document.activeElement === ok ? cancel : ok).focus();
+        const list = focusables();
+        const i = list.indexOf(document.activeElement);
+        const next = event.shiftKey ? (i <= 0 ? list.length - 1 : i - 1) : (i + 1) % list.length;
+        if (list[next]) list[next].focus();
       }
     };
     const onBackdrop = event => { if (event.target === modal) finish(false); };
+    const attempt = async () => {
+      if (closed) return;
+      if (!o.requirePassword) { finish(true); return; }
+      const password = passInput ? passInput.value : '';
+      if (!password) {
+        if (passError) { passError.textContent = 'Admin şifresini gir.'; passError.hidden = false; }
+        if (passInput) passInput.focus();
+        return;
+      }
+      const session = (() => { try { return JSON.parse(prefGet('pc_session') || 'null'); } catch (e) { return null; } })();
+      if (!session || !session.email || !session.hash) {
+        if (passError) { passError.textContent = 'Oturum bulunamadı; lütfen tekrar giriş yap.'; passError.hidden = false; }
+        return;
+      }
+      let valid = false;
+      try { valid = (await passHashOf(session.email, password)) === session.hash; }
+      catch (e) { valid = false; }
+      if (closed) return;
+      if (!valid) {
+        if (passError) { passError.textContent = 'Admin şifresi hatalı.'; passError.hidden = false; }
+        if (passInput) { passInput.value = ''; passInput.focus(); }
+        return;
+      }
+      finish(true);
+    };
     document.addEventListener('keydown', onKey, true);
     modal.addEventListener('mousedown', onBackdrop);
-    ok.onclick = () => finish(true);
+    if (passInput) passInput.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); attempt(); } };
+    ok.onclick = attempt;
     cancel.onclick = () => finish(false);
   });
 }
@@ -1460,12 +1501,11 @@ function renderInventory() {
             : '<span class="status-pill ok">Yeterli</span>';
       return `<tr>
         <td><span class="color-name"><i class="color-dot" style="background:${colorSwatch(row.name)}"></i>${esc(row.name)}</span></td>
-        <td><div class="input-wrap mini-input"><input type="number" min="0" max="100000" step="0.001" data-color-stock="${esc(row.name)}" value="${Number(row.stockKg.toFixed(3))}" aria-label="${esc(row.name)} stoğu kg"><b>kg</b></div></td>
+        <td class="stock-readonly-cell" title="Stok miktarı buradan değiştirilemez; Bakım ve Gider sekmesindeki filament alımını kullan"><strong>${fmt(row.stockKg,3)}</strong> <small class="muted">kg</small></td>
         <td title="Alım fiyatlarının gram ağırlıklı ortalaması">${money(row.avgPrice)} <small class="muted">/ kg</small></td>
         <td>${fmt(row.neededKg,2)} kg</td>
         <td class="${short?'is-bad':'is-good'}">${fmt(row.remaining,2)} kg</td>
         <td>${status}</td>
-        <td><button class="delete-btn" type="button" data-color-remove="${esc(row.name)}" title="Bu rengi stoktan kaldır" aria-label="${esc(row.name)} rengini stoktan kaldır">×</button></td>
       </tr>`;
     }).join('');
   }
@@ -1541,7 +1581,7 @@ function renderInventory() {
   if (chartSig.price !== barSig) {
     chartSig.price = barSig;
     $('priceBars').innerHTML = series.map(s=>`<div class="price-bar${s.current?' current':''}" title="${esc(s.label)}: ${money(s.price)}"><span class="price-bar-fill" data-v="${Math.max(6,(s.price/maxPrice)*100).toFixed(2)}" style="height:0%"></span><small>${esc(s.label)}</small></div>`).join('');
-    playPriceBars(isPageActive('inventory'));
+    playPriceBars(isPageActive('maintenance'));
   }
 
   // --- Enflasyon tablosu ---
@@ -1690,7 +1730,7 @@ function renderSales() {
   $('statProfitCaption').textContent = sales.length ? `Yapılan ${sales.length} satış kaydından` : 'Henüz satış kaydı yok';
   $('salesEmpty').style.display = records.length ? 'none' : 'block';
   $('salesRows').innerHTML = records.map(s=>`<tr class="${s.type==='package'?'is-package':''}">
-    <td><input type="checkbox" class="row-select" data-select-sale="${esc(s.id)}" aria-label="Satışı seç" ${selectedSales.has(String(s.id))?'checked':''}></td><td>${esc(s.date)}</td><td>${saleNameCell(s)}</td><td>${saleQtyCell(s)}</td><td>${money(s.unitPrice)}</td><td class="money">${money(s.revenue)}</td><td>${money(s.unitCost)}</td><td>${money(s.totalCost)}</td><td class="${s.profit>=0?'profit-positive':'profit-negative'}">${money(s.profit)}</td><td>${esc(s.note||'')}</td><td><button class="detail-btn" data-sale-detail="${esc(s.id)}" type="button">Fiyat detayı</button></td><td><button class="delete-btn" data-sale-delete="${esc(s.id)}" title="Satış kaydını sil" aria-label="Satış kaydını sil">×</button></td>
+    <td><input type="checkbox" class="row-select" data-select-sale="${esc(s.id)}" aria-label="Satışı seç" ${selectedSales.has(String(s.id))?'checked':''}></td><td>${esc(s.date)}</td><td>${saleNameCell(s)}</td><td>${saleQtyCell(s)}</td><td>${money(s.unitPrice)}</td><td class="money">${money(s.revenue)}</td><td>${money(s.unitCost)}</td><td>${money(s.totalCost)}</td><td class="${s.profit>=0?'profit-positive':'profit-negative'}">${money(s.profit)}</td><td>${esc(s.note||'')}</td><td><div class="sale-actions"><button class="detail-btn" data-sale-detail="${esc(s.id)}" type="button">Fiyat detayı</button>${s.type==='package' ? `<button class="detail-btn resell-btn" data-sale-resell="${esc(s.id)}" type="button">Tekrar sat</button>` : ''}</div></td><td><button class="delete-btn" data-sale-delete="${esc(s.id)}" title="Satış kaydını sil" aria-label="Satış kaydını sil">×</button></td>
   </tr>`).join('');
   refreshTableLabels($('salesRows')?.closest('table')); syncBulkToolbars();
   renderCostHistory();
@@ -1977,10 +2017,12 @@ $('productRows').addEventListener('click',event=>{
 $('salesRows').addEventListener('click',event=>{
   const detailButton=event.target.closest('[data-sale-detail]');
   if(detailButton){showSaleDetails(detailButton.dataset.saleDetail);return;}
+  const resellButton=event.target.closest('[data-sale-resell]');
+  if(resellButton){openRepackageSale(resellButton.dataset.saleResell);return;}
   const button=event.target.closest('[data-sale-delete]'); if(!button)return;
   const record=sales.find(s=>String(s.id)===button.dataset.saleDelete);
   if (!cloudReady) { toast('Bulut bağlantısı kurulmadan satış silinemez.'); return; }
-  confirmDialog({ title:'Satış kaydını sil', message:`${record?.productName||'Bu'} satış kaydı silinecek.`, confirmText:'Kaydı sil', danger:true }).then(ok=>{
+  confirmDialog({ title:'Satış kaydını sil', message:`${record?.productName||'Bu'} satış kaydı silinecek. Eski satış kayıtları yalnızca admin şifresiyle silinebilir.`, confirmText:'Kaydı sil', danger:true, requirePassword:true }).then(ok=>{
     if(!ok) return;
     if(!record)return;
     const copy={...record}; delete copy.id;
@@ -2030,7 +2072,7 @@ $('productBulkDelete')?.addEventListener('click',async()=>{
 });
 $('salesBulkDelete')?.addEventListener('click',async()=>{
   const targets=sales.filter(s=>selectedSales.has(String(s.id))); if(!targets.length)return;
-  if(!await confirmDialog({title:'Toplu satış silme',message:`${targets.length} satış kaydı 5 saniye boyunca geri alınabilir şekilde silinecek.`,confirmText:'Seçilenleri sil',danger:true}))return;
+  if(!await confirmDialog({title:'Toplu satış silme',message:`${targets.length} satış kaydı 5 saniye boyunca geri alınabilir şekilde silinecek. Bu işlem için admin şifresi gerekli.`,confirmText:'Seçilenleri sil',danger:true,requirePassword:true}))return;
   selectedSales.clear(); targets.forEach(s=>{const copy={...s};delete copy.id;undoableDelete('sale',s.id,copy,salesRef.child(s.id),`“${s.productName||'Satış'}”`);});
 });
 
@@ -2412,41 +2454,8 @@ if ($('productionModal')) {
   $('productionForm').addEventListener('submit', saveProduction);
 }
 
-/* ---------- Renk stoğu tablosu olayları ---------- */
-if ($('colorStockRows')) {
-  $('colorStockRows').addEventListener('change', event => {
-    const input = event.target.closest('input[data-color-stock]');
-    if (!input) return;
-    const color = input.dataset.colorStock;
-    if(!validateNumericElement(input)){input.value=stockKgOf(color);return;}
-    const parsed = parseStrictNumber(input.value,{min:0,max:100000});
-    if (!parsed.ok) { toast(`${color}: ${parsed.reason}.`, 'error'); input.value = stockKgOf(color); return; }
-    const kg = parsed.value;
-    const existing = normalizeStockEntry(filamentStock[color]);
-    filamentStock[color] = {
-      kg, totalWeightGrams: Math.round(kg * 1000),
-      weightedAveragePricePerKg: existing.weightedAveragePricePerKg ?? params().filamentPrice,
-      updatedAt: Date.now()
-    };
-    renderProducts(); renderSales(); renderInventory();
-    writeColorStock(color, kg)
-      .then(()=>toast(`${color} stoğu ${fmt(kg,2)} kg olarak güncellendi.`))
-      .catch(()=>{});
-  });
-  $('colorStockRows').addEventListener('click', event => {
-    const button = event.target.closest('[data-color-remove]');
-    if (!button) return;
-    const color = button.dataset.colorRemove;
-    if (!cloudReady) { toast('Bulut bağlantısı kurulmadan stok silinemez.'); return; }
-    confirmDialog({ title:'Rengi stoktan kaldır', message:`"${color}" rengi stoktan kaldırılacak.`, confirmText:'Kaldır', danger:true }).then(ok=>{
-      if(!ok) return;
-      delete filamentStock[color];
-      deleteColorStock(color);
-      renderProducts(); renderSales(); renderInventory();
-      toast('Renk stoktan kaldırıldı.');
-    });
-  });
-}
+/* ---------- Renk stoğu tablosu salt okunurdur ----------
+   Stok miktarı yalnızca filament alımı (Bakım & Gider) ve üretim kayıtlarıyla değişir. */
 
 /* ---------- Fotoğraf büyütme (lightbox) ---------- */
 const lb = { items:[], index:0, zoom:1, panX:0, panY:0, dragging:false, trigger:null, timer:null };
@@ -2628,7 +2637,7 @@ document.addEventListener('keydown', event => {
    Tercihler (tema, kenar çubuğu, oturum) tarayıcıda küçük anahtarlar olarak
    tutulur; iş verileri hâlâ yalnızca Firebase'dedir.
    ========================================================= */
-const THEMES = { dark:'#09090b', light:'#f4f5f7', midnight:'#050b1a', glass:'#0b1030', olive:'#0b0e08', carbon:'#070707', indigo:'#0d0f18', 'modern-dark':'#08090d', 'clean-light':'#f7f8fa', forest:'#07130f', 'midnight-blue':'#050b1a', 'admin-v2':'#0b1329', 'dashboard-v26':'#f8fafc' };
+const THEMES = { dark:'#09090b', light:'#f4f5f7', midnight:'#050b1a', glass:'#0b1030', 'glass-2':'#0e0f11', 'lilac-haze':'#1e1c24', olive:'#0b0e08', carbon:'#070707', indigo:'#0d0f18', 'modern-dark':'#08090d', 'clean-light':'#f7f8fa', forest:'#07130f', 'midnight-blue':'#050b1a', 'admin-v2':'#0b1329', 'dashboard-v26':'#f8fafc' };
 function prefGet(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
 function prefSet(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* gizli mod vb. */ } }
 function prefDel(key) { try { localStorage.removeItem(key); } catch (e) { /* yoksay */ } }
@@ -3386,6 +3395,7 @@ function savePackageSale(event) {
   const record = {
     type: 'package',
     date: $('pkgDate').value || todayISO(),
+    packageName: typedName || '',
     productName: typedName || items.map(i => `${i.name} ×${i.qty}`).join(' + '),
     items,
     qty: c.pq, unitsTotal: perPackageUnits * c.pq,
@@ -3439,6 +3449,42 @@ function showPackageDetails(sale) {
     </tbody></table></div>
     <div class="detail-total"><span>Paket satış fiyatı<strong>${money(sale.unitPrice)}</strong></span><span>Paket adedi<strong>${fmt(sale.qty, 0)}</strong></span><span>Toplam ciro<strong>${money(sale.revenue)}</strong></span><span>Toplam maliyet<strong>${money(sale.totalCost)}</strong></span><span>Bu satışın net kârı<strong>${money(sale.profit)}</strong></span></div>`;
   $('saleDetailModal').hidden = false;
+}
+/* Geçmiş bir paket satışını yeniden satışa hazırlar.
+   Yeni kayıt oluşturmaz: paket formunu eski içerikle doldurup düzenlemeye açar.
+   Kullanıcı ürün ekleyip çıkarabilir, adetleri ve fiyatı değiştirebilir; kayıt
+   yalnızca form gönderildiğinde (savePackageSale) mamul stoktan düşülerek yazılır. */
+function openRepackageSale(saleId) {
+  const sale = sales.find(item => String(item.id) === String(saleId));
+  if (!sale || sale.type !== 'package') { toast('Yalnızca paket satışları yeniden satılabilir.', 'warning'); return; }
+  const sourceItems = packageItemsOf(sale);
+  const missing = [];
+  const items = sourceItems.map(item => {
+    if (!productById(item.productId)) missing.push(item.name);
+    return { productId: productById(item.productId) ? item.productId : '', qty: Math.max(1, Math.floor(item.qty) || 1) };
+  });
+  PKG.items = items.length ? items : [{ productId: '', qty: 1 }];
+  PKG.sig = null;
+  $('pkgName').value = sale.packageName || '';
+  $('pkgQty').value = 1;
+  $('pkgPrice').value = Math.max(0, Number(sale.unitPrice) || 0);
+  $('pkgDate').value = todayISO();
+  $('pkgNote').value = '';
+  setSaleMode('package');
+  renderPackageRows();
+  updatePackageSummary();
+  const form = $('packageForm');
+  form.classList.add('is-editing');
+  setTimeout(() => form.classList.remove('is-editing'), 1600);
+  form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const firstSelect = $('pkgItemRows') && $('pkgItemRows').querySelector('select');
+  if (firstSelect) setTimeout(() => firstSelect.focus({ preventScroll: true }), 260);
+  toast(
+    missing.length
+      ? `Tekrar satış formu açıldı. Silinmiş ürünler çıkarıldı: ${missing.join(', ')}. İçeriği ve fiyatı düzenleyip kaydet.`
+      : 'Tekrar satış formu açıldı. İstersen ürün ekle/çıkar, adet ve fiyatı değiştir; kaydedince yeni satış oluşur.',
+    'info', { title: 'Yeniden satış hazırlığı', duration: 6500 }
+  );
 }
 function initPackageUi() {
   const form = $('packageForm');
