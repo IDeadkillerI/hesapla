@@ -5,7 +5,7 @@ const $ = id => document.getElementById(id);
  * BULUT MİMARİSİ
  * Tüm kalıcı veriler Firebase Realtime Database üzerinde tutulur.
  * Yerel dosya veya tarayıcı hafızası kullanılmaz.
- * Veri yolu: printcost/{params|filamentStock|products|sales|costHistory}
+ * Veri yolu: printcost/{params|filamentStock|filamentPurchases|products|sales|costHistory}
  * ========================================================= */
 const CLOUD_ROOT = 'printcost';
 
@@ -69,6 +69,9 @@ let filamentStockRef = null;
 let maintenanceFundRef = null;
 let maintenanceLogsRef = null;
 let productionLogsRef = null;
+let filamentPurchasesRef = null;
+// Filament alımları (printcost/filamentPurchases): her alım bir gider kaydıdır.
+let filamentPurchases = [];
 let presenceRef = null;
 // Bakım & gider fonu (printcost/maintenanceFund) ve gerçek masraf kayıtları.
 let maintenanceFund = {balance:0, totalAccrued:0, totalSpent:0, updatedAt:0};
@@ -123,6 +126,7 @@ function initFirebase() {
     maintenanceFundRef = rootRef.child('maintenanceFund');
     maintenanceLogsRef = rootRef.child('maintenanceLogs');
     productionLogsRef = rootRef.child('productionLogs');
+    filamentPurchasesRef = rootRef.child('filamentPurchases');
     presenceRef = rootRef.child('system/presence');
     cloudReady = true;
     const banner = $('cloudBanner');
@@ -251,6 +255,16 @@ function attachCloudListeners() {
       .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
     if ($('productDetailModal') && !$('productDetailModal').hidden) renderProductDetail();
   }, error => cloudError(error, 'üretim kayıtlarını okuma'));
+
+  // Filament alım giderleri.
+  filamentPurchasesRef.on('value', snap => {
+    const value = snap.val() || {};
+    filamentPurchases = Object.entries(value)
+      .map(([id, p]) => ({id, ...p}))
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+    renderPurchases();
+    renderSales();
+  }, error => cloudError(error, 'filament alımlarını okuma'));
 
   // onDisconnect: sekme kapanınca/bağlantı kopunca oturum "offline" işaretlenir.
   // Bu düğüm yalnızca bağlantı sağlığı göstergesidir; stok/satış verisini etkilemez.
@@ -736,6 +750,172 @@ function handleProduction(productId, quantity, colorUsageMap, nameHint) {
     }, false);
   });
   return acquireRootCache().then(release => runAttempt(0).finally(release));
+}
+
+/**
+ * Üretimi geri al.
+ * Tek transaction'da: üretim kaydını siler → kaydın tükettiği renk gramlarını filament
+ * stoğuna geri ekler (ağırlıklı ortalama fiyat korunur) → ürünün hazır mamul adedini
+ * üretilen adet kadar düşer. Üretilen adetlerin bir kısmı satıldıysa (mamul stok < adet)
+ * işlem reddedilir; çünkü stok negatife düşemez.
+ */
+function undoProduction(logId) {
+  if (!cloudReady || !rootRef) { toast('Bulut bağlantısı kurulmadan üretim geri alınamaz.', 'warning'); return Promise.resolve(false); }
+  if (!firebaseConnected || navigator.onLine === false) {
+    toast('Bağlantı yok. Stok güvenliği için üretim geri alma bağlantı gelene kadar engellendi.', 'warning');
+    return Promise.resolve(false);
+  }
+  const log = productionLogs.find(item => String(item.id) === String(logId));
+  if (!log) { toast('Üretim kaydı bulunamadı.', 'error'); return Promise.resolve(false); }
+  const logColors = (Array.isArray(log.colors) ? log.colors : Object.values(log.colors || {}));
+  const summary = logColors.map(col => `${col.name} ${fmt(Number(col.grams) || 0, 1)} g`).join(', ');
+  return confirmDialog({
+    title: 'Üretimi geri al',
+    message: `"${log.productName || 'Ürün'}" için ${fmt(Number(log.qty) || 0, 0)} adetlik üretim iptal edilecek. Tüketilen filament (${summary || 'renk kaydı yok'}) stoğa geri eklenir ve mamul stoktan ${fmt(Number(log.qty) || 0, 0)} adet düşülür.`,
+    confirmText: 'Geri al', danger: true
+  }).then(ok => {
+    if (!ok) return false;
+    let reason = '';
+    const runAttempt = attempt => new Promise((resolve, reject) => {
+      reason = '';
+      rootRef.transaction(current => {
+        reason = '';
+        const root = current || {};
+        const logs = {...(root.productionLogs || {})};
+        const rec = logs[logId];
+        if (!rec) { reason = 'missing-log'; return; }
+        const qty = Math.max(0, Math.floor(Number(rec.qty) || 0));
+        const products = {...(root.products || {})};
+        const key = matchProductKey(products, rec.productId, rec.productName);
+        if (key) {
+          const available = readyStockOf(products[key]);
+          if (available < qty) { reason = `sold:${available}:${qty}`; return; }
+          products[key] = {...products[key], readyStock: available - qty};
+          root.products = products;
+        }
+        const stock = {...(root.filamentStock || {})};
+        const recColors = Array.isArray(rec.colors) ? rec.colors : Object.values(rec.colors || {});
+        for (const col of recColors) {
+          const name = sanitizeColorName(col?.name);
+          const grams = Math.max(0, Number(col?.grams) || 0);
+          if (!name || !grams) continue;
+          const raw = stock[name];
+          const entry = normalizeStockEntry(raw);
+          const total = entry.totalWeightGrams + grams;
+          stock[name] = {
+            ...(raw && typeof raw === 'object' ? raw : {}),
+            kg: round3(total / 1000),
+            totalWeightGrams: Math.round(total),
+            weightedAveragePricePerKg: entry.weightedAveragePricePerKg ?? params().filamentPrice,
+            updatedAt: Date.now()
+          };
+        }
+        root.filamentStock = stock;
+        delete logs[logId];
+        root.productionLogs = logs;
+        return root;
+      }, (error, committed) => {
+        if (error) {
+          if (attempt < TX_MAX_ATTEMPTS - 1 && txShouldRetry(error)) { setTimeout(() => runAttempt(attempt + 1).then(resolve, reject), txRetryDelay(attempt)); return; }
+          reject(error); return;
+        }
+        if (!committed) {
+          if (reason) { resolve(false); return; }
+          if (attempt < TX_MAX_ATTEMPTS - 1) { setTimeout(() => runAttempt(attempt + 1).then(resolve, reject), txRetryDelay(attempt)); return; }
+          reject(new Error('transaction-aborted')); return;
+        }
+        resolve(true);
+      }, false);
+    });
+    return acquireRootCache().then(release => runAttempt(0).finally(release)).then(done => {
+      if (done) {
+        toast(`Üretim geri alındı. ${summary ? summary + ' filament stoğa iade edildi.' : ''} Mamul stoktan ${fmt(Number(log.qty) || 0, 0)} adet düşüldü.`, 'success');
+        return true;
+      }
+      if (reason.startsWith('sold:')) {
+        const [, available, qty] = reason.split(':');
+        toast(`Geri alınamadı: bu üretimden ${qty} adet düşülmesi gerekiyor ama mamul stokta yalnızca ${available} adet var (bir kısmı satılmış olabilir).`, 'error', {title:'Mamul stok yetersiz'});
+      } else if (reason === 'missing-log') {
+        toast('Bu üretim kaydı zaten geri alınmış veya silinmiş.', 'warning');
+      } else {
+        toast('Üretim geri alınamadı, lütfen tekrar deneyin.', 'error');
+      }
+      return false;
+    }).catch(error => { cloudError(error, 'üretimi geri alma'); return false; });
+  });
+}
+
+/* ---------- Filament alım giderleri ---------- */
+function purchasesInBounds(bounds) {
+  return filamentPurchases.filter(p => {
+    if (!bounds || !bounds.start) return true;
+    const d = localDate(p.date);
+    return d && d >= bounds.start && d < bounds.end;
+  });
+}
+const purchaseTotalOf = p => Number(p.total) || round2((Number(p.kg) || 0) * (Number(p.pricePerKg) || 0));
+function renderPurchases() {
+  const rowsEl = $('purchaseRows');
+  if (!rowsEl) return;
+  const total = filamentPurchases.reduce((sum, p) => sum + purchaseTotalOf(p), 0);
+  const kg = filamentPurchases.reduce((sum, p) => sum + (Number(p.kg) || 0), 0);
+  if ($('purchaseTotalAll')) $('purchaseTotalAll').textContent = money(total);
+  if ($('purchaseTotalKg')) $('purchaseTotalKg').textContent = `${fmt(kg, 2)} kg`;
+  if ($('purchaseCount')) $('purchaseCount').textContent = `${filamentPurchases.length} alım kaydı`;
+  rowsEl.innerHTML = filamentPurchases.map(p => `<tr>
+    <td>${esc(p.date || '')}</td><td>${esc(p.color || '')}</td><td>${fmt(Number(p.kg) || 0, 2)} kg</td>
+    <td>${money(p.pricePerKg)} / kg</td><td class="profit-negative">−${money(purchaseTotalOf(p))}</td>
+    <td><button class="delete-btn" type="button" data-purchase-delete="${esc(p.id)}" title="Alımı geri al" aria-label="Alımı geri al">×</button></td>
+  </tr>`).join('');
+  if ($('purchaseEmpty')) $('purchaseEmpty').style.display = filamentPurchases.length ? 'none' : 'block';
+  refreshTableLabels(rowsEl.closest('table'));
+}
+// Alımı geri al: kaydı siler, eklenen kiloyu stoktan düşer (gider de otomatik kalkar).
+function deletePurchase(id) {
+  const rec = filamentPurchases.find(p => String(p.id) === String(id));
+  if (!rec || !cloudReady) return;
+  confirmDialog({
+    title: 'Filament alımını geri al',
+    message: `${rec.color} · ${fmt(Number(rec.kg) || 0, 2)} kg alımı (${money(purchaseTotalOf(rec))}) silinecek; ${fmt(Number(rec.kg) || 0, 2)} kg stoktan düşülecek ve gider kaydı kaldırılacak.`,
+    confirmText: 'Geri al', danger: true
+  }).then(ok => {
+    if (!ok) return;
+    let insufficient = false, missing = false;
+    acquireRootCache().then(release => new Promise((resolve, reject) => {
+      rootRef.transaction(current => {
+        insufficient = false; missing = false;
+        const root = current || {};
+        const list = {...(root.filamentPurchases || {})};
+        const p = list[id];
+        if (!p) { missing = true; return; }
+        const stock = {...(root.filamentStock || {})};
+        const raw = stock[p.color];
+        const entry = normalizeStockEntry(raw);
+        const grams = (Number(p.kg) || 0) * 1000;
+        if (entry.totalWeightGrams + 1e-6 < grams) { insufficient = true; return; }
+        const left = Math.max(0, entry.totalWeightGrams - grams);
+        stock[p.color] = {...(raw && typeof raw === 'object' ? raw : {}), kg: round3(left / 1000), totalWeightGrams: Math.round(left),
+          weightedAveragePricePerKg: entry.weightedAveragePricePerKg ?? params().filamentPrice, updatedAt: Date.now()};
+        root.filamentStock = stock;
+        delete list[id];
+        root.filamentPurchases = list;
+        return root;
+      }, (error, committed) => error ? reject(error) : resolve(committed), false);
+    }).finally(release)).then(committed => {
+      if (committed) toast('Filament alımı geri alındı; stok ve gider güncellendi.', 'success');
+      else if (insufficient) toast('Geri alınamadı: bu renkte, alınan miktar kadar stok kalmamış (üretimde kullanılmış).', 'error');
+      else if (missing) toast('Alım kaydı zaten silinmiş.', 'warning');
+      else toast('Alım geri alınamadı, tekrar deneyin.', 'error');
+    }).catch(error => cloudError(error, 'alım geri alma'));
+  });
+}
+function updateStockTotalPreview() {
+  const el = $('stockAddTotal');
+  if (!el) return;
+  const kg = Number($('stockAddKg').value), price = Number($('stockAddPrice').value);
+  el.innerHTML = kg > 0 && price > 0
+    ? `Bu alım <strong>${money(kg * price)}</strong> gider olarak kaydedilecek (${fmt(kg, 2)} kg × ${money(price)}).`
+    : 'Miktar ve fiyat girildiğinde toplam gider burada görünür.';
 }
 function undoableDelete(type, id, record, ref, label) {
   const key = `${type}:${id}`;
@@ -1408,6 +1588,12 @@ function saveStockEntry(event) {
     lastPurchasePrice: price,
     updatedAt: Date.now()
   };
+  // Alım bedeli gider olarak kaydedilir (alım silinirse gider de kalkar).
+  const purchaseKey = filamentPurchasesRef.push().key;
+  updates[`filamentPurchases/${purchaseKey}`] = {
+    date: dateValue, color, kg: round3(kg), pricePerKg: round2(price),
+    total: round2(kg * price), createdAt: Date.now()
+  };
   if (priceChanged) updates['params/filamentPrice'] = price;
   let historyEntry = null;
   if (priceChanged) {
@@ -1437,6 +1623,8 @@ function saveStockEntry(event) {
       toast(priceChanged
         ? `${color} stoğuna ${fmt(kg,2)} kg eklendi. Ağırlıklı ortalama fiyat ${money(newAvgPrice)} / kg; son alım ${money(price)} / kg.`
         : `${color} stoğuna ${fmt(kg,2)} kg filament eklendi. Ağırlıklı ortalama ${money(newAvgPrice)} / kg.`);
+      toast(`${money(kg * price)} gider olarak kaydedildi.`, 'info');
+      updateStockTotalPreview();
     })
     .catch(error => cloudError(error, 'stok girişi'));
 }
@@ -1484,6 +1672,15 @@ function renderSales() {
   const profit = records.reduce((sum,s)=>sum+(Number(s.profit)||0),0);
   $('salesUnits').textContent = fmt(qty,0); $('salesRevenue').textContent = money(revenue);
   $('salesCost').textContent = money(cost); $('salesProfit').textContent = money(profit);
+  // Seçili dönemdeki filament alım giderleri ve gider sonrası bakiye.
+  const expense = purchasesInBounds(bounds).reduce((sum, p) => sum + purchaseTotalOf(p), 0);
+  if ($('salesExpense')) $('salesExpense').textContent = money(expense);
+  if ($('salesAfterExpense')) {
+    const after = profit - expense;
+    $('salesAfterExpense').textContent = money(after);
+    $('salesAfterExpense').classList.toggle('profit-negative', after < 0);
+    $('salesAfterExpense').classList.toggle('profit-positive', after >= 0);
+  }
   // Ana sayfadaki kâr kartı, dönem filtresinden bağımsız olarak gerçek satış kayıtlarından gelir.
   const allProfit = sales.reduce((sum, s) => sum + (Number(s.profit) || 0), 0);
   $('statProfit').textContent = money(allProfit);
@@ -1835,6 +2032,12 @@ $('salesBulkDelete')?.addEventListener('click',async()=>{
 });
 
 $('stockForm').addEventListener('submit',saveStockEntry);
+['stockAddKg','stockAddPrice'].forEach(id => $(id)?.addEventListener('input', updateStockTotalPreview));
+updateStockTotalPreview();
+$('purchaseRows')?.addEventListener('click', event => {
+  const btn = event.target.closest('[data-purchase-delete]');
+  if (btn) deletePurchase(btn.dataset.purchaseDelete);
+});
 $('saleProduct').addEventListener('change',()=>{const p=productById($('saleProduct').value); if(p && Number(p.sale)>0) $('salePrice').value=p.sale;});
 $('salesPeriod').addEventListener('change',renderSales);
 $('closeSaleDetail').addEventListener('click',()=>$('saleDetailModal').hidden=true);
@@ -1937,6 +2140,7 @@ function renderProductDetail() {
         <span class="production-log-qty">+${fmt(Number(log.qty)||0,0)} adet</span>
         <span class="production-log-colors">${colorText || 'Renk kaydı yok'}</span>
         <span class="production-log-total">${fmt(Number(log.totalGrams)||0,1)} g</span>
+        <button class="btn btn-ghost production-undo-btn" type="button" data-production-undo="${esc(log.id)}" title="Üretimi iptal et, filamenti stoğa iade et">↶ Geri al</button>
       </div>`;
     }).join('')}</div>` : '<p class="empty-inline">Henüz üretim kaydı yok. Üret düğmesiyle ilk üretimini ekle.</p>';
   $('productDetailInfo').innerHTML = `
@@ -2006,6 +2210,8 @@ if ($('productDetailModal')) {
     }
     if (event.target.closest('[data-detail-photo-transparent]')) { makeProductPhotoTransparent(detailProductId); return; }
     if (event.target.closest('[data-production-open]')) { openProductionModal(detailProductId); return; }
+    const undoBtn = event.target.closest('[data-production-undo]');
+    if (undoBtn) { undoBtn.disabled = true; undoProduction(undoBtn.dataset.productionUndo).finally(() => { undoBtn.disabled = false; }); return; }
     const addButton = event.target.closest('[data-detail-add-color]');
     if (addButton) { addDetailColor(); return; }
     const deleteButton = event.target.closest('[data-color-delete]');
@@ -3562,7 +3768,7 @@ function exportJsonBackup() {
     })
     .catch(error => cloudError(error, 'JSON yedeği'));
 }
-const BACKUP_ALLOWED_KEYS = ['params', 'filamentStock', 'products', 'sales', 'costHistory', 'maintenanceFund', 'maintenanceLogs', 'productionLogs', 'auth', 'system'];
+const BACKUP_ALLOWED_KEYS = ['params', 'filamentStock', 'products', 'sales', 'costHistory', 'maintenanceFund', 'maintenanceLogs', 'productionLogs', 'filamentPurchases', 'auth', 'system'];
 function restoreJsonBackup(file) {
   if (!file) return;
   if (!cloudReady || !rootRef) { toast('Bulut bağlantısı olmadan yedek geri yüklenemez.', 'warning'); return; }

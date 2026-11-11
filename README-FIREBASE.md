@@ -168,3 +168,16 @@ konsolunda **Realtime Database → Import JSON** ile içe aktarabilirsin; ancak 
   grafiklere kendiliğinden dahil olur; listede **Paket** etiketiyle ve içerik özetiyle görünür.
   "Satış adedi" paketlerde içerdeki toplam ürün adedini sayar. Maliyetler satış anında kaydedildiği
   için ürün fiyatları sonradan değişse de geçmiş kâr değişmez.
+
+## 8. Üretimi geri alma ve filament alım giderleri
+
+- **Üretimi geri al:** Ürün detay penceresindeki "Son üretim kayıtları" satırlarında **↶ Geri al** düğmesi bulunur.
+  Tek bir transaction'da: üretim kaydı silinir → kaydın tükettiği renk gramları `filamentStock`'a geri eklenir
+  (ağırlıklı ortalama fiyat korunur) → ürünün `readyStock` değeri üretilen adet kadar düşer. Üretilen adetlerin bir
+  kısmı satılmışsa (mamul stok < adet) işlem reddedilir.
+- **Filament alım gideri:** Envanter → "Stok girişi / filament alımı" formundan girilen her alım
+  `printcost/filamentPurchases/{pushId}` altına `{date, color, kg, pricePerKg, total, createdAt}` olarak yazılır
+  (stok güncellemesiyle aynı `update()` içinde). Envanter sayfasında alım geçmişi ve toplam gider,
+  Satış Kayıtları sayfasında seçili döneme göre "Filament alım gideri" ve "Gider sonrası bakiye" kartları görünür.
+  Alım satırındaki × düğmesi alımı geri alır: kiloyu stoktan düşer ve gideri kaldırır (stok yetmiyorsa engellenir).
+- Yedek/geri yükleme izin listesine `filamentPurchases` eklendi.

@@ -650,7 +650,7 @@ td input.sale-input:focus{border-color:rgba(var(--accent-rgb),.65)}
 .sale-note-field{grid-column:span 2}
 .sale-submit{grid-column:1 / -1;justify-self:end;align-self:end;min-width:210px;min-height:44px}
 
-.sales-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0 0 20px}
+.sales-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 20px}
 .sales-stats article{
   display:flex;flex-direction:column;gap:8px;
   padding:15px 16px;
@@ -2307,9 +2307,13 @@ input.is-invalid:focus{outline:none}
 .detail-actions-note{font-size:11px;color:var(--muted-2)}
 .detail-actions-note strong{color:var(--text-strong);font-variant-numeric:tabular-nums}
 .production-log-list{display:grid;gap:6px}
+.production-undo-btn{padding:4px 10px;font-size:11px;white-space:nowrap}
+.purchase-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+.stock-total-preview{margin:10px 0 0}
+.stock-total-preview strong{color:var(--text-strong)}
 .production-log-row{
   display:grid;
-  grid-template-columns:88px 84px minmax(0,1fr) 72px;
+  grid-template-columns:88px 84px minmax(0,1fr) 72px auto;
   gap:10px;align-items:center;
   padding:8px 11px;
   border:1px solid var(--line);
@@ -2324,5 +2328,6 @@ input.is-invalid:focus{outline:none}
   .production-color-row{grid-template-columns:12px minmax(0,1fr) minmax(0,1fr) auto}
   .production-color-row .color-edit-meta{grid-column:2 / -1}
   .production-log-row{grid-template-columns:1fr auto;gap:4px 10px}
+  .production-undo-btn{grid-column:1 / -1;justify-self:start}
   .production-log-colors{grid-column:1 / -1;white-space:normal}
 }

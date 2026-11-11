@@ -192,6 +192,8 @@
           <article><span>Toplam ciro</span><strong id="salesRevenue">₺0,00</strong></article>
           <article><span>Satılan ürün maliyeti</span><strong id="salesCost">₺0,00</strong></article>
           <article><span>Net kâr</span><strong id="salesProfit">₺0,00</strong></article>
+          <article><span>Filament alım gideri</span><strong id="salesExpense" class="profit-negative">₺0,00</strong></article>
+          <article><span>Gider sonrası bakiye</span><strong id="salesAfterExpense">₺0,00</strong></article>
         </div>
         <div class="sales-chart" id="salesChartCard">
           <div class="sales-chart-head">
@@ -276,7 +278,23 @@
               <label class="field"><span>Alım tarihi</span><input id="stockAddDate" type="date" required></label>
               <button class="btn btn-primary" type="submit"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Stoğa ekle</button>
             </form>
+            <p class="muted stock-total-preview" id="stockAddTotal" aria-live="polite"></p>
             <datalist id="stockColorList"></datalist>
+          </div>
+          <div class="stock-buy purchase-history">
+            <div class="color-stock-head">
+              <div><h3>Filament alım giderleri</h3><p class="muted">Her stok girişi gider olarak kaydedilir. Alımı geri alırsan stok düşülür ve gider kalkar.</p></div>
+              <span class="tag" id="purchaseCount">0 alım kaydı</span>
+            </div>
+            <div class="stock-cards purchase-cards">
+              <article><span>Toplam filament gideri</span><strong id="purchaseTotalAll">₺0,00</strong><small>Tüm alımlar</small></article>
+              <article><span>Toplam alınan filament</span><strong id="purchaseTotalKg">0 kg</strong><small>Tüm alımlar</small></article>
+            </div>
+            <div class="table-wrap"><table class="history-table purchase-table">
+              <thead><tr><th>Tarih</th><th>Renk</th><th>Miktar</th><th>Birim fiyat</th><th>Gider</th><th></th></tr></thead>
+              <tbody id="purchaseRows"></tbody>
+            </table></div>
+            <div id="purchaseEmpty" class="empty-state">Henüz filament alımı yok. Yukarıdaki formdan alım girdiğinde burada görünür.</div>
           </div>
         </section>
 
