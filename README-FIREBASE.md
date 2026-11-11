@@ -55,6 +55,10 @@ printcost/
 │   ├── colors/ [{ name, grams }]  (üretimde tüketilen toplam renk gramları)
 │   ├── totalGrams, readyStockAfter
 │   └── createdAt
+├── wasteLogs/{pushId}/
+│   ├── date, color, grams, hours, amortization,
+│   ├── filamentCost, energyCost, totalCost, pricePerKg, note
+│   └── createdAt, updatedAt
 ├── sales/{pushId}/
 │   ├── date, productId, productName, qty, unitPrice, unitCost,
 │   ├── revenue, totalCost, profit, note, createdAt, costSnapshot

@@ -73,8 +73,14 @@ let maintenanceFundRef = null;
 let maintenanceLogsRef = null;
 let productionLogsRef = null;
 let filamentPurchasesRef = null;
+let wasteLogsRef = null;
 // Filament alımları (printcost/filamentPurchases): her alım bir gider kaydıdır.
 let filamentPurchases = [];
+// Atık filament / hatalı baskı kayıtları (printcost/wasteLogs): gram stoğu düşer,
+// hesaplanan maliyet net gelirden düşülür. Kayıtlar düzeltilebilir ve geri alınabilir.
+let wasteLogs = [];
+let wasteEditingId = null;
+let wasteAmortManual = false;
 let presenceRef = null;
 // Bakım & gider fonu (printcost/maintenanceFund) ve gerçek masraf kayıtları.
 let maintenanceFund = {balance:0, totalAccrued:0, totalSpent:0, updatedAt:0};
@@ -130,6 +136,7 @@ function initFirebase() {
     maintenanceLogsRef = rootRef.child('maintenanceLogs');
     productionLogsRef = rootRef.child('productionLogs');
     filamentPurchasesRef = rootRef.child('filamentPurchases');
+    wasteLogsRef = rootRef.child('wasteLogs');
     presenceRef = rootRef.child('system/presence');
     cloudReady = true;
     const banner = $('cloudBanner');
@@ -268,6 +275,16 @@ function attachCloudListeners() {
     renderPurchases();
     renderSales();
   }, error => cloudError(error, 'filament alımlarını okuma'));
+
+  // Atık filament / hatalı baskı kayıtları.
+  if (wasteLogsRef) wasteLogsRef.on('value', snap => {
+    const value = snap.val() || {};
+    wasteLogs = Object.entries(value)
+      .map(([id, log]) => ({id, ...log}))
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+    renderWaste();
+    renderSales();
+  }, error => cloudError(error, 'atık kayıtlarını okuma'));
 
   // onDisconnect: sekme kapanınca/bağlantı kopunca oturum "offline" işaretlenir.
   // Bu düğüm yalnızca bağlantı sağlığı göstergesidir; stok/satış verisini etkilemez.
@@ -912,6 +929,293 @@ function deletePurchase(id) {
     }).catch(error => cloudError(error, 'alım geri alma'));
   });
 }
+/* ---------- Atık filament / hatalı baskı ----------
+   Kayıt eklendiğinde: gramaj seçilen renk stoğundan düşer, maliyet (filament +
+   makine amortismanı + elektrik) hesaplanır ve net gelirden düşülür. Kayıtlar
+   düzeltilebilir (eski gram stoğa iade edilir, yenisi düşülür) ve geri alınabilir
+   (gram stoğa iade edilir, kayıt silinir). Tüm işlemler tek transaction'dır. */
+const wasteTotalOf = log => {
+  const stored = Number(log?.totalCost);
+  if (Number.isFinite(stored)) return round2(stored);
+  return round2((Number(log?.filamentCost) || 0) + (Number(log?.amortization) || 0) + (Number(log?.energyCost) || 0));
+};
+function wasteCostInBounds(bounds) {
+  return wasteLogs.reduce((sum, log) => {
+    if (!bounds || !bounds.start) return sum + wasteTotalOf(log);
+    const d = localDate(log.date);
+    return d && d >= bounds.start && d < bounds.end ? sum + wasteTotalOf(log) : sum;
+  }, 0);
+}
+function wasteCostParts({grams, hours, amortization, color}) {
+  const x = params();
+  const rates = hourlyRates(x);
+  const pricePerKg = colorAveragePrice(color, x.filamentPrice);
+  const filament = round2((Number(grams) || 0) / 1000 * pricePerKg);
+  const energy = round2((Number(hours) || 0) * rates.energy);
+  const amort = round2(Number(amortization) || 0);
+  return {pricePerKg: round2(pricePerKg), filament, energy, amortization: amort, total: round2(filament + energy + amort)};
+}
+function renderWaste() {
+  if (!$('wasteRows')) return;
+  const total = wasteLogs.reduce((sum, log) => sum + wasteTotalOf(log), 0);
+  const grams = wasteLogs.reduce((sum, log) => sum + (Number(log.grams) || 0), 0);
+  if ($('wasteTotalCost')) $('wasteTotalCost').textContent = money(total);
+  if ($('wasteTotalGrams')) $('wasteTotalGrams').textContent = `${fmt(grams,0)} g`;
+  if ($('wasteCount')) $('wasteCount').textContent = `${wasteLogs.length} kayıt`;
+  $('wasteRows').innerHTML = wasteLogs.map(log => `<tr>
+    <td>${esc(log.date || '—')}</td>
+    <td><span class="color-name"><i class="color-dot" style="background:${colorSwatch(log.color)}"></i>${esc(log.color || '—')}</span></td>
+    <td>${fmt(Number(log.grams) || 0, 1)} g</td>
+    <td>${fmt(Number(log.hours) || 0, 1)} sa</td>
+    <td>${money(log.filamentCost)}</td>
+    <td>${money(log.amortization)}</td>
+    <td>${money(log.energyCost)}</td>
+    <td class="profit-negative">− ${money(wasteTotalOf(log))}</td>
+    <td>${esc(log.note || '')}</td>
+    <td><div class="sale-actions"><button class="detail-btn" type="button" data-waste-edit="${esc(log.id)}" title="Kaydı düzelt">Düzelt</button><button class="delete-btn" type="button" data-waste-delete="${esc(log.id)}" title="Kaydı geri al ve stok iade et" aria-label="Kaydı geri al">×</button></div></td>
+  </tr>`).join('');
+  if ($('wasteEmpty')) $('wasteEmpty').style.display = wasteLogs.length ? 'none' : 'block';
+  refreshTableLabels($('wasteRows').closest('table'));
+}
+function updateWastePreview() {
+  const el = $('wastePreview');
+  if (!el) return;
+  const color = sanitizeColorName($('wasteColor').value);
+  const grams = Number($('wasteGrams').value) || 0;
+  if (!color || grams <= 0) {
+    el.textContent = 'Maliyet için renk ve gramaj gir.';
+    return;
+  }
+  const c = wasteCostParts({
+    grams,
+    hours: Number($('wasteHours').value) || 0,
+    amortization: Number($('wasteAmortization').value) || 0,
+    color
+  });
+  el.innerHTML = `Filament <strong>${money(c.filament)}</strong> · Makine amortismanı <strong>${money(c.amortization)}</strong> · Elektrik <strong>${money(c.energy)}</strong> · Toplam maliyet <strong>${money(c.total)}</strong> · Stoktan düşecek <strong>${fmt(grams,1)} g</strong> (${money(c.pricePerKg)}/kg)`;
+}
+function resetWasteForm() {
+  wasteEditingId = null;
+  wasteAmortManual = false;
+  const form = $('wasteForm');
+  if (form) form.reset();
+  if ($('wasteColor')) $('wasteColor').value = '';
+  if ($('wasteGrams')) $('wasteGrams').value = '';
+  if ($('wasteHours')) $('wasteHours').value = 0;
+  if ($('wasteAmortization')) $('wasteAmortization').value = 0;
+  if ($('wasteDate')) $('wasteDate').value = todayISO();
+  if ($('wasteNote')) $('wasteNote').value = '';
+  if ($('wasteEditBanner')) $('wasteEditBanner').hidden = true;
+  if ($('wasteSubmit')) $('wasteSubmit').innerHTML = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Atık kaydını ekle ve stoktan düş';
+  updateWastePreview();
+}
+function startEditWaste(id) {
+  const log = wasteLogs.find(item => String(item.id) === String(id));
+  if (!log) return;
+  wasteEditingId = log.id;
+  wasteAmortManual = true;   // Kayıtlı amortisman değeri korunur, süre değişse de ezilmez.
+  if ($('wasteColor')) $('wasteColor').value = log.color || '';
+  if ($('wasteGrams')) $('wasteGrams').value = Number(log.grams) || '';
+  if ($('wasteHours')) $('wasteHours').value = Number(log.hours) || 0;
+  if ($('wasteAmortization')) $('wasteAmortization').value = Number(log.amortization) || 0;
+  if ($('wasteDate')) $('wasteDate').value = log.date || todayISO();
+  if ($('wasteNote')) $('wasteNote').value = log.note || '';
+  if ($('wasteEditBanner')) $('wasteEditBanner').hidden = false;
+  if ($('wasteSubmit')) $('wasteSubmit').innerHTML = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Değişikliği kaydet';
+  updateWastePreview();
+  $('wastePanel')?.scrollIntoView({behavior:'smooth', block:'start'});
+  $('wasteGrams')?.focus();
+}
+async function saveWaste(event) {
+  event.preventDefault();
+  if (!cloudReady) { toast('Bulut bağlantısı kurulmadan atık kaydı eklenemez.'); return; }
+  if (!firebaseConnected || navigator.onLine === false) { toast('Bağlantı yok. Stok düşümü gerektiren atık kaydı bağlantı gelene kadar yapılamaz.', 'warning'); return; }
+  if (!validateFormInputs($('wasteForm'))) return;
+  const color = sanitizeColorName($('wasteColor').value);
+  if (!color) { toast('Atık kaydı için bir renk seç.', 'warning'); $('wasteColor').focus(); return; }
+  const gramsParsed = parseStrictNumber($('wasteGrams').value, {min:0.01, max:1000000});
+  if (!gramsParsed.ok) { toast(`Gramaj: ${gramsParsed.reason}.`, 'error'); $('wasteGrams').focus(); return; }
+  const hoursRaw = $('wasteHours').value.trim();
+  const amortRaw = $('wasteAmortization').value.trim();
+  const hoursParsed = parseStrictNumber(hoursRaw === '' ? '0' : hoursRaw, {min:0, max:100000});
+  const amortParsed = parseStrictNumber(amortRaw === '' ? '0' : amortRaw, {min:0, max:100000000});
+  if (!hoursParsed.ok) { toast(`Baskı süresi: ${hoursParsed.reason}.`, 'error'); return; }
+  if (!amortParsed.ok) { toast(`Makine amortismanı: ${amortParsed.reason}.`, 'error'); return; }
+  const grams = gramsParsed.value;
+  const hours = hoursParsed.value;
+  const amortization = amortParsed.value;
+  const c = wasteCostParts({grams, hours, amortization, color});
+  const date = $('wasteDate').value || todayISO();
+  const note = $('wasteNote').value.trim();
+  const editingId = wasteEditingId;
+  if (!wasteLogsRef) { toast('Bulut bağlantısı hazır değil.', 'error'); return; }
+  const newKey = wasteLogsRef.push().key;
+  let reason = '', available = 0;
+  const runAttempt = attempt => new Promise((resolve, reject) => {
+    rootRef.transaction(current => {
+      reason = ''; available = 0;
+      const root = current || {};
+      const logs = {...(root.wasteLogs || {})};
+      const stock = {...(root.filamentStock || {})};
+      const existing = editingId ? logs[editingId] : null;
+      if (editingId && !existing) { reason = 'missing'; return; }
+      const addToStock = (name, addGrams) => {
+        const raw = stock[name];
+        const entry = normalizeStockEntry(raw);
+        const total = entry.totalWeightGrams + addGrams;
+        stock[name] = {
+          ...(raw && typeof raw === 'object' ? raw : {}),
+          kg: round3(total / 1000),
+          totalWeightGrams: Math.round(total),
+          weightedAveragePricePerKg: entry.weightedAveragePricePerKg ?? params().filamentPrice,
+          updatedAt: Date.now()
+        };
+      };
+      // Düzeltmede eski gramaj önce stoğa iade edilir; yeni gramaj sonra düşülür.
+      if (existing) {
+        const oldColor = sanitizeColorName(existing.color);
+        const oldGrams = Math.max(0, Number(existing.grams) || 0);
+        if (oldColor && oldGrams > 0) addToStock(oldColor, oldGrams);
+      }
+      const raw = stock[color];
+      const entry = normalizeStockEntry(raw);
+      if (entry.totalWeightGrams + 1e-6 < grams) { reason = 'insufficient'; available = entry.totalWeightGrams; return; }
+      const left = Math.max(0, entry.totalWeightGrams - grams);
+      stock[color] = {
+        ...(raw && typeof raw === 'object' ? raw : {}),
+        kg: round3(left / 1000),
+        totalWeightGrams: Math.round(left),
+        weightedAveragePricePerKg: entry.weightedAveragePricePerKg ?? params().filamentPrice,
+        updatedAt: Date.now()
+      };
+      root.filamentStock = stock;
+      const payload = {
+        date, color, grams: round2(grams), hours: round2(hours),
+        amortization: c.amortization, filamentCost: c.filament, energyCost: c.energy,
+        totalCost: c.total, pricePerKg: c.pricePerKg, note, updatedAt: Date.now()
+      };
+      if (existing) logs[editingId] = {...existing, ...payload};
+      else logs[newKey] = {...payload, createdAt: Date.now()};
+      root.wasteLogs = logs;
+      return root;
+    }, (error, committed) => {
+      if (error) {
+        if (attempt < TX_MAX_ATTEMPTS - 1 && txShouldRetry(error)) { setTimeout(() => runAttempt(attempt + 1).then(resolve, reject), txRetryDelay(attempt)); return; }
+        reject(error); return;
+      }
+      if (!committed) {
+        if (reason) { resolve(false); return; }
+        if (attempt < TX_MAX_ATTEMPTS - 1) { setTimeout(() => runAttempt(attempt + 1).then(resolve, reject), txRetryDelay(attempt)); return; }
+        reject(new Error('transaction-aborted')); return;
+      }
+      resolve(true);
+    }, false);
+  });
+  const releaseRootCache = await acquireRootCache();
+  try {
+    const done = await runAttempt(0);
+    if (done) {
+      toast(editingId
+        ? `Atık kaydı düzeltildi. ${fmt(grams,1)} g ${color} stoktan düşüldü; maliyet ${money(c.total)} net gelirden düşülüyor.`
+        : `Atık kaydı eklendi. ${fmt(grams,1)} g ${color} stoktan düşüldü; ${money(c.total)} net gelirden düşüldü.`, 'success');
+      resetWasteForm();
+    } else if (reason === 'insufficient') {
+      toast(`Yetersiz stok: "${color}" için ${fmt(available/1000,3)} kg var, ${fmt(grams/1000,3)} kg düşülemez.`, 'error', {title:'Filament stoğu yetersiz'});
+    } else if (reason === 'missing') {
+      toast('Düzeltilecek kayıt artık bulunmuyor; form sıfırlandı.', 'warning');
+      resetWasteForm();
+    } else {
+      toast('Atık kaydı kaydedilemedi, lütfen tekrar deneyin.', 'error');
+    }
+  } catch (error) {
+    cloudError(error, 'atık kaydı');
+  } finally {
+    releaseRootCache();
+  }
+}
+function deleteWaste(id) {
+  const log = wasteLogs.find(item => String(item.id) === String(id));
+  if (!log || !cloudReady) return;
+  confirmDialog({
+    title: 'Atık kaydını geri al',
+    message: `${log.date || ''} · ${log.color} · ${fmt(Number(log.grams) || 0, 1)} g atık kaydı silinecek. Gramaj filamento stoğuna iade edilecek ve ${money(wasteTotalOf(log))} maliyet net gelirden kalkacak.`,
+    confirmText: 'Geri al', danger: true
+  }).then(ok => {
+    if (!ok) return;
+    let reason = '';
+    const runAttempt = attempt => new Promise((resolve, reject) => {
+      rootRef.transaction(current => {
+        reason = '';
+        const root = current || {};
+        const logs = {...(root.wasteLogs || {})};
+        const rec = logs[id];
+        if (!rec) { reason = 'missing'; return; }
+        const color = sanitizeColorName(rec.color);
+        const grams = Math.max(0, Number(rec.grams) || 0);
+        const stock = {...(root.filamentStock || {})};
+        if (color && grams > 0) {
+          const raw = stock[color];
+          const entry = normalizeStockEntry(raw);
+          const total = entry.totalWeightGrams + grams;
+          stock[color] = {
+            ...(raw && typeof raw === 'object' ? raw : {}),
+            kg: round3(total / 1000),
+            totalWeightGrams: Math.round(total),
+            weightedAveragePricePerKg: entry.weightedAveragePricePerKg ?? params().filamentPrice,
+            updatedAt: Date.now()
+          };
+          root.filamentStock = stock;
+        }
+        delete logs[id];
+        root.wasteLogs = logs;
+        return root;
+      }, (error, committed) => {
+        if (error) {
+          if (attempt < TX_MAX_ATTEMPTS - 1 && txShouldRetry(error)) { setTimeout(() => runAttempt(attempt + 1).then(resolve, reject), txRetryDelay(attempt)); return; }
+          reject(error); return;
+        }
+        if (!committed) {
+          if (reason) { resolve(false); return; }
+          if (attempt < TX_MAX_ATTEMPTS - 1) { setTimeout(() => runAttempt(attempt + 1).then(resolve, reject), txRetryDelay(attempt)); return; }
+          reject(new Error('transaction-aborted')); return;
+        }
+        resolve(true);
+      }, false);
+    });
+    acquireRootCache().then(release => runAttempt(0).finally(release)).then(done => {
+      if (done) toast(`Atık kaydı geri alındı; ${fmt(Number(log.grams) || 0, 1)} g ${log.color} stoğa iade edildi.`, 'success');
+      else if (reason === 'missing') toast('Bu kayıt zaten silinmiş.', 'warning');
+      else toast('Kayıt geri alınamadı, lütfen tekrar deneyin.', 'error');
+    }).catch(error => cloudError(error, 'atık kaydı geri alma'));
+  });
+}
+function initWasteUi() {
+  const form = $('wasteForm');
+  if (!form) return;
+  form.addEventListener('submit', saveWaste);
+  if ($('wasteDate')) $('wasteDate').value = todayISO();
+  if ($('wasteCancelEdit')) $('wasteCancelEdit').addEventListener('click', resetWasteForm);
+  if ($('inventoryWasteBtn')) $('inventoryWasteBtn').addEventListener('click', () => {
+    showPage('maintenance');
+    setTimeout(() => $('wastePanel')?.scrollIntoView({behavior:'smooth', block:'start'}), 320);
+  });
+  if ($('wasteHours')) $('wasteHours').addEventListener('input', () => {
+    if (!wasteAmortManual && $('wasteAmortization')) {
+      $('wasteAmortization').value = round2((Number($('wasteHours').value) || 0) * hourlyRates(params()).depreciation);
+    }
+    updateWastePreview();
+  });
+  if ($('wasteAmortization')) $('wasteAmortization').addEventListener('input', () => { wasteAmortManual = true; updateWastePreview(); });
+  ['wasteColor', 'wasteGrams'].forEach(id => { if ($(id)) $(id).addEventListener('input', updateWastePreview); });
+  if ($('wasteRows')) $('wasteRows').addEventListener('click', event => {
+    const editBtn = event.target.closest('[data-waste-edit]');
+    if (editBtn) { startEditWaste(editBtn.dataset.wasteEdit); return; }
+    const delBtn = event.target.closest('[data-waste-delete]');
+    if (delBtn) deleteWaste(delBtn.dataset.wasteDelete);
+  });
+  renderWaste();
+}
+
 function updateStockTotalPreview() {
   const el = $('stockAddTotal');
   if (!el) return;
@@ -1413,22 +1717,28 @@ function renderProducts() {
   });
   refreshTableLabels(rows.closest('table')); syncBulkToolbars();
   const all = state.products.map(p=>({p,c:calc(p,x)}));
-  // "Toplam üretim" kartı satılabilir hazır mamul stoğunu gösterir.
-  const units = state.products.reduce((sum,p)=>sum+readyStockOf(p),0);
-  const total = all.reduce((sum,item)=>sum+item.c.total,0);
+  // Maliyet analizi yalnızca FİİLEN ÜRETİLMİŞ ürünleri yansıtır: ürünün hazır mamul
+  // stoğu (readyStock) kaç adet ise maliyet o adet üzerinden hesaplanır. Hiç üretim
+  // yapılmadıysa tüm kalemler 0 kalır.
+  const produced = all
+    .map(item => ({...item, producedQty: readyStockOf(item.p)}))
+    .filter(item => item.producedQty > 0);
+  const units = produced.reduce((sum,item)=>sum+item.producedQty,0);
+  const total = produced.reduce((sum,item)=>sum+item.c.unit*item.producedQty,0);
   $('statProducts').textContent = state.products.length;
   $('statUnits').textContent = fmt(units,0);
   $('statCost').textContent = money(total);
-  $('totalFooter').textContent = `Toplam maliyet: ${money(total)}`;
+  const plannedTotal = all.reduce((sum,item)=>sum+item.c.total,0);
+  $('totalFooter').textContent = `Toplam maliyet: ${money(plannedTotal)}`;
   $('rowCount').textContent = `${state.products.length} ürün`;
   const costs = [
-    ['Filament',all.reduce((s,a)=>s+a.c.filament*a.p.qty,0)],
-    ['Elektrik',all.reduce((s,a)=>s+a.c.electric*a.p.qty,0)],
-    ['Stand',all.reduce((s,a)=>s+a.c.stand*a.p.qty,0)],
-    ['Makine amortismanı',all.reduce((s,a)=>s+a.c.machine*a.p.qty,0)],
-    ['Aşınma & bakım',all.reduce((s,a)=>s+a.c.wear*a.p.qty,0)],
-    ['Fire payı',all.reduce((s,a)=>s+a.c.fire*a.p.qty,0)],
-    ['Çakmak',all.reduce((s,a)=>s+a.c.lighter*a.p.qty,0)]
+    ['Filament',produced.reduce((s,a)=>s+a.c.filament*a.producedQty,0)],
+    ['Elektrik',produced.reduce((s,a)=>s+a.c.electric*a.producedQty,0)],
+    ['Stand',produced.reduce((s,a)=>s+a.c.stand*a.producedQty,0)],
+    ['Makine amortismanı',produced.reduce((s,a)=>s+a.c.machine*a.producedQty,0)],
+    ['Aşınma & bakım',produced.reduce((s,a)=>s+a.c.wear*a.producedQty,0)],
+    ['Fire payı',produced.reduce((s,a)=>s+a.c.fire*a.producedQty,0)],
+    ['Çakmak',produced.reduce((s,a)=>s+a.c.lighter*a.producedQty,0)]
   ];
   const totalCost = costs.reduce((sum,item)=>sum+item[1],0);
   const palette = ['#6657e8','#2996d6','#e89a42','#22a77a','#d65c78','#b05ce0','#3aa4a1'];
@@ -1447,6 +1757,26 @@ function renderProducts() {
       return `<div class="break-row"><span class="break-name"><i style="background:${palette[index]}"></i>${name}</span><div class="bar-track"><div class="bar-fill" data-v="${Math.max(0,pct).toFixed(2)}" style="width:0%;background:${palette[index]}"></div></div><span class="break-value">${money(value)} <small>%${fmt(pct,1)}</small></span></div>`;
     }).join('');
     playCostChart(isPageActive('analysis'));   // görünürse animasyonlu; değilse son hâliyle çiz
+  }
+  if ($('costChartCaption')) {
+    $('costChartCaption').textContent = produced.length
+      ? `Stokta üretilmiş ${fmt(units,0)} adet ürünün güncel maliyeti. Üretim yoksa değer 0 olur.`
+      : 'Stokta üretilmiş ürün yok; hiç üretim yapılmadığı için maliyet 0.';
+  }
+  // Üretilen ürünlerin maliyet tablosu (maliyet analizi sayfası).
+  const producedRows = $('producedCostRows');
+  if (producedRows) {
+    producedRows.innerHTML = produced.map(({p, c, producedQty}) => `<tr>
+      <td>${esc(p.name || 'İsimsiz ürün')}</td>
+      <td>${fmt(producedQty,0)}</td>
+      <td class="money">${money(c.unit)}</td>
+      <td class="money">${money(c.unit * producedQty)}</td>
+      <td>${money(p.sale)}</td>
+      <td class="${c.profit >= 0 ? 'profit-positive' : 'profit-negative'}">${money(c.profit)}</td>
+    </tr>`).join('');
+    if ($('producedCostTag')) $('producedCostTag').textContent = `${produced.length} ürün · ${fmt(units,0)} adet`;
+    if ($('producedCostEmpty')) $('producedCostEmpty').style.display = produced.length ? 'none' : 'block';
+    refreshTableLabels(producedRows.closest('table'));
   }
   renderSaleProductOptions();
   renderInventory();
@@ -1715,11 +2045,13 @@ function renderSales() {
   const profit = records.reduce((sum,s)=>sum+(Number(s.profit)||0),0);
   $('salesUnits').textContent = fmt(qty,0); $('salesRevenue').textContent = money(revenue);
   $('salesCost').textContent = money(cost); $('salesProfit').textContent = money(profit);
-  // Seçili dönemdeki filament alım giderleri ve gider sonrası bakiye.
+  // Seçili dönemdeki filament alım ve atık / hatalı baskı giderleri ile gider sonrası bakiye.
   const expense = purchasesInBounds(bounds).reduce((sum, p) => sum + purchaseTotalOf(p), 0);
+  const wasteExpense = wasteCostInBounds(bounds);
   if ($('salesExpense')) $('salesExpense').textContent = money(expense);
+  if ($('salesWaste')) $('salesWaste').textContent = money(wasteExpense);
   if ($('salesAfterExpense')) {
-    const after = profit - expense;
+    const after = profit - expense - wasteExpense;
     $('salesAfterExpense').textContent = money(after);
     $('salesAfterExpense').classList.toggle('profit-negative', after < 0);
     $('salesAfterExpense').classList.toggle('profit-positive', after >= 0);
@@ -3626,6 +3958,7 @@ function initMaintenanceUi() {
   const form = $('maintenanceForm');
   if (!form) return;
   form.addEventListener('submit', saveMaintenanceExpense);
+  initWasteUi();
   if ($('maintenanceDate')) $('maintenanceDate').value = todayISO();
   if ($('maintenanceRows')) {
     $('maintenanceRows').addEventListener('click', event => {
@@ -3764,6 +4097,11 @@ async function exportExcel() {
         return [color, round3(entry.kg), Math.round(entry.totalWeightGrams), round2(entry.weightedAveragePricePerKg ?? p.filamentPrice)];
       }),
       [24, 14, 20, 30]);
+    addSheet('AtikHataliBaski',
+      ['Tarih', 'Renk', 'Gram', 'Baskı saati', 'Filament (TL)', 'Amortisman (TL)', 'Elektrik (TL)', 'Toplam maliyet (TL)', 'Not'],
+      wasteLogs.map(log => [log.date || '', log.color || '', round2(log.grams), round2(log.hours),
+        round2(log.filamentCost), round2(log.amortization), round2(log.energyCost), wasteTotalOf(log), log.note || '']),
+      [12, 16, 10, 14, 16, 18, 16, 22, 34]);
     addSheet('Parametreler',
       ['Anahtar', 'Değer'],
       Object.entries({...p, minStockKg:Math.max(0, Number(state.minStockKg) || 0), filamentStockKg:Math.max(0, Number(state.filamentStockKg) || 0)}),
@@ -3817,7 +4155,7 @@ function exportJsonBackup() {
     })
     .catch(error => cloudError(error, 'JSON yedeği'));
 }
-const BACKUP_ALLOWED_KEYS = ['params', 'filamentStock', 'products', 'sales', 'costHistory', 'maintenanceFund', 'maintenanceLogs', 'productionLogs', 'filamentPurchases', 'auth', 'system'];
+const BACKUP_ALLOWED_KEYS = ['params', 'filamentStock', 'products', 'sales', 'costHistory', 'maintenanceFund', 'maintenanceLogs', 'productionLogs', 'filamentPurchases', 'wasteLogs', 'auth', 'system'];
 function restoreJsonBackup(file) {
   if (!file) return;
   if (!cloudReady || !rootRef) { toast('Bulut bağlantısı olmadan yedek geri yüklenemez.', 'warning'); return; }

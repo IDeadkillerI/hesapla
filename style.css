@@ -1847,6 +1847,14 @@ html[data-sb="collapsed"] body:not(.sb-ready) .sidebar{width:0;padding-left:0;pa
 }
 :root[data-theme="glass"] :is(.input-wrap,.searchbox){background:rgba(255,255,255,.07)}
 :root[data-theme="glass"] :is(.input-wrap,.searchbox) input{background:transparent}
+:root[data-theme="glass"] :is(select,.sales-form select,.sales-toolbar select,.pkg-item-row select,.data-card select){
+  background-color:rgba(12,16,48,.92);
+  color:#f6f7ff;
+}
+:root[data-theme="glass"] :is(select option,select optgroup){
+  background-color:#141a3c;
+  color:#f6f7ff;
+}
 :root[data-theme="glass"] .detail-photo-btn{background:radial-gradient(62% 56% at 50% 56%,rgba(255,255,255,.2),transparent 74%)}
 .theme-swatch[data-t="glass"]{background:linear-gradient(135deg,#4f46e5,#ec4899 55%,#14b8a6)}
 .theme-swatch[data-t="glass"]::after{background:rgba(255,255,255,.88);box-shadow:0 0 0 2px rgba(255,255,255,.35)}
@@ -2419,6 +2427,16 @@ input.is-invalid:focus{outline:none}
 }
 :root[data-theme="glass-2"] :is(.input-wrap,.searchbox){background:rgba(255,255,255,.065)}
 :root[data-theme="glass-2"] :is(.input-wrap,.searchbox) input{background:transparent}
+/* Glass temalarında açılır liste metni ve zemini aynı beyaz olduğu için
+   seçenekler okunamıyordu. Select ve option'lar koyu, opak zemine alınır. */
+:root[data-theme="glass-2"] :is(select,.sales-form select,.sales-toolbar select,.pkg-item-row select,.data-card select){
+  background-color:rgba(20,21,24,.94);
+  color:#f6f6f5;
+}
+:root[data-theme="glass-2"] :is(select option,select optgroup){
+  background-color:#1b1c1f;
+  color:#f6f6f5;
+}
 .theme-swatch[data-t="glass-2"]{background:linear-gradient(135deg,#f6f5f2,#c9c7c1 45%,#5c5c60 78%,#1d1d20)}
 .theme-swatch[data-t="glass-2"]::after{background:#ffffff;box-shadow:0 0 0 2px rgba(255,255,255,.32)}
 @media (prefers-reduced-motion:reduce){:root[data-theme="glass-2"] body::before{animation:none}}
@@ -2489,6 +2507,10 @@ input.is-invalid:focus{outline:none}
 
 /* ---------- Satış satırı eylemleri / yeniden satış ---------- */
 .sale-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.waste-shortcut{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:14px 0 18px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r-md);background:rgba(var(--ov),.02)}
+.waste-shortcut .muted{font-size:12px}
+.waste-edit-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;border-left-color:var(--amber);color:var(--text-2)}
+.waste-edit-banner[hidden]{display:none}
 .resell-btn{border-color:rgba(52,211,153,.38);color:var(--emerald);background:var(--emerald-soft)}
 .resell-btn:hover{background:rgba(52,211,153,.20);border-color:rgba(52,211,153,.55);color:var(--text-strong)}
 #packageForm.is-editing{animation:repackagePulse 1.5s ease-out 1}

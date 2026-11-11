@@ -117,7 +117,7 @@
         <article class="stat-card">
           <div class="stat-top"><span>Toplam üretim maliyeti</span><span class="stat-icon orange"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7.5h17v9h-17z"/><path d="M12 9.5v5M9.8 11h4.4M9.8 13h4.4"/></svg></span></div>
           <strong id="statCost">₺0,00</strong>
-          <small>Kayıtlı ürünlerin tahmini maliyeti</small>
+          <small>Stoktaki üretilmiş ürünlerin maliyeti</small>
         </article>
         <article class="stat-card">
           <div class="stat-top"><span>Satışlardan net kâr</span><span class="stat-icon green"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 17 6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg></span></div>
@@ -195,6 +195,7 @@
           <article><span>Satılan ürün maliyeti</span><strong id="salesCost">₺0,00</strong></article>
           <article><span>Net kâr</span><strong id="salesProfit">₺0,00</strong></article>
           <article><span>Filament alım gideri</span><strong id="salesExpense" class="profit-negative">₺0,00</strong></article>
+          <article><span>Atık / hatalı baskı gideri</span><strong id="salesWaste" class="profit-negative">₺0,00</strong></article>
           <article><span>Gider sonrası bakiye</span><strong id="salesAfterExpense">₺0,00</strong></article>
         </div>
         <div class="sales-chart" id="salesChartCard">
@@ -252,8 +253,12 @@
             <article><span>Plan sonrası kalan</span><strong id="stockRemaining">0 kg</strong><small>Bakiye</small></article>
             <article><span>Darboğaz ürün</span><strong id="stockBottleneck">—</strong><small id="stockBottleneckNote">Stok sınırı</small></article>
           </div>
+          <div class="waste-shortcut">
+            <span class="muted">Hatalı baskı / atık filament gramajını stoktan düşmek ve maliyeti net gelirden çıkarmak için:</span>
+            <button class="btn btn-ghost" id="inventoryWasteBtn" type="button">Atık / hatalı baskı kaydı ekle</button>
+          </div>
           <div class="color-stock-head">
-            <div><h3>Renk bazlı stok</h3><p class="muted">Her rengin stokta kalan miktarı. Bu tablo salt okunurdur; stok miktarı yalnızca Bakım &amp; Gider sekmesindeki filament alımı ve üretim kayıtlarıyla değişir.</p></div>
+            <div><h3>Renk bazlı stok</h3><p class="muted">Her rengin stokta kalan miktarı. Bu tablo salt okunurdur; stok miktarı yalnızca Bakım &amp; Gider sekmesindeki filament alımı, üretim kayıtları ve atık / hatalı baskı kayıtlarıyla değişir.</p></div>
             <span class="tag" id="colorStockTag">0 renk</span>
           </div>
           <div class="table-wrap"><table class="stock-table color-stock-table">
@@ -270,17 +275,28 @@
             <tbody id="stockRows"></tbody>
           </table></div>
           <div id="stockEmpty" class="empty-state">Henüz ürün yok. Ürünler sayfasından ürün ekleyebilirsin.</div>
-          <p class="note">Filament stok miktarı bu bölümden değiştirilemez. Stok artışı yalnızca <strong>Bakım &amp; Gider</strong> sekmesindeki filament alımı formuyla, stok düşüşü ise üretim kayıtlarıyla yapılır.</p>
+          <p class="note">Filament stok miktarı bu bölümden değiştirilemez. Stok artışı yalnızca <strong>Bakım &amp; Gider</strong> sekmesindeki filament alımı formuyla; stok düşüşü ise üretim ve atık / hatalı baskı kayıtlarıyla yapılır.</p>
         </section>
       </section>
 
       <section class="page-section analysis-page" id="analysis">
         <div class="section-heading"><div><p class="eyebrow">05 / DETAYLI ANALİZ</p><h2>Maliyet analizi</h2><p class="muted">Maliyet dağılımı ve hesaplama açıklamaları bu ayrı bölümde yer alır.</p></div><span class="tag">Canlı analiz</span></div>
         <div class="analysis-grid">
-          <article class="panel chart-panel"><div class="section-heading"><div><p class="eyebrow">GİDERLER</p><h2>Maliyet dağılımı</h2></div></div><div class="cost-visual"><div id="costDonut" class="cost-donut"><div class="donut-center"><strong id="costGrandTotal">₺0,00</strong><span>Toplam maliyet</span></div></div><div id="costBreakdown" class="breakdown"></div></div></article>
+          <article class="panel chart-panel"><div class="section-heading"><div><p class="eyebrow">GİDERLER</p><h2>Maliyet dağılımı</h2><p class="muted" id="costChartCaption">Yalnızca stokta bulunan üretilmiş ürünlerin maliyeti. Hiç üretim yoksa 0 görünür.</p></div></div><div class="cost-visual"><div id="costDonut" class="cost-donut"><div class="donut-center"><strong id="costGrandTotal">₺0,00</strong><span>Toplam maliyet</span></div></div><div id="costBreakdown" class="breakdown"></div></div></article>
           <article class="panel tips-panel"><div class="section-heading"><div><p class="eyebrow">BİLGİ</p><h2>Hesaplama notları</h2></div><span class="stat-icon green"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span></div><ul><li>Filament maliyeti, üründe tanımlı renklerin gram/adet toplamı üzerinden hesaplanır. Renk tanımlanmamış ürünlerde toplam gram ÷ adet değeri kullanılır.</li><li>Elektrik maliyeti adet başına <strong>(baskı süresi ÷ adet) × (yazıcı gücü ÷ 1000) × kWh fiyatı</strong> olarak hesaplanır; toplam sürenin adede düşen payı esas alınır.</li><li>Amortisman adet başına <strong>(baskı süresi ÷ adet) × (yazıcı bedeli ÷ beklenen ömür)</strong>, aşınma ise <strong>(baskı süresi ÷ adet) × bakım fonu</strong> formülüyle hesaplanır. Bakım fonu nozzle, PTFE, PEI, ekstruder dişlisi ve fan giderlerini kapsar. Baskı süresi girilmeyen ürünlerde bu üç kalem sıfırdır.</li><li>Fire payı, başarısız baskılar için filament, stand ve enerji maliyetinin üzerine <strong>(1 + fire oranı)</strong> çarpanıyla eklenir.</li><li>Stand maliyeti, stand filamentinin toplam maliyetinin ilgili ürün adedine bölünmesiyle hesaplanır.</li><li>Çakmak maliyeti, hedef üretim adedine bölünerek tüm ürünlere uygulanır.</li><li>Envanter sayfası, her rengin deposunda kalan miktarı ayrı gösterir ve salt okunurdur. Ürünlerin renk gramlarına göre stokla kaç adet basılabileceği fire dahil hesaplanır; stok girişleri, filament alım giderleri ve fiyat değişimleri Bakım &amp; Gider sekmesinde takip edilir.</li>
-<li>Bir ürünün fotoğrafına veya satırına tıklandığında ürün detayı açılır; o üründe kullanılan renkler, her renkten kaç gram kullanıldığı ve büyük ürün fotoğrafı görüntülenir.</li><li>Satış kaydında ciro, maliyet ve kâr saklanır; haftalık ve aylık özetler seçilen döneme göre güncellenir.</li></ul><p class="note">Tüm ürünler, satışlar, maliyet parametreleri ve fiyat geçmişi Google Firebase Realtime Database'de saklanır. Başka bir cihazdan veya mobil veriyle girdiğinde aynı veriler onValue dinleyicisiyle anlık olarak yüklenir; tarayıcı hafızası kullanılmaz.</p></article>
+<li>Bir ürünün fotoğrafına veya satırına tıklandığında ürün detayı açılır; o üründe kullanılan renkler, her renkten kaç gram kullanıldığı ve büyük ürün fotoğrafı görüntülenir.</li><li>Satış kaydında ciro, maliyet ve kâr saklanır; haftalık ve aylık özetler seçilen döneme göre güncellenir.</li><li>Maliyet dağılımı ve üretilen ürünlerin maliyet tablosu yalnızca stokta hazır mamul olarak bulunan ürünleri esas alır. Hiç üretim yapılmadıysa maliyet 0 görünür; ürün planındaki adetler bu tabloya yansımaz.</li><li>Atık / hatalı baskı kayıtlarındaki gramaj filament stoğundan düşer; filament, makine amortismanı ve elektrikten oluşan toplam maliyet net gelirden düşülür. Kayıtlar düzeltilebilir veya geri alınabilir.</li></ul><p class="note">Tüm ürünler, satışlar, maliyet parametreleri ve fiyat geçmişi Google Firebase Realtime Database'de saklanır. Başka bir cihazdan veya mobil veriyle girdiğinde aynı veriler onValue dinleyicisiyle anlık olarak yüklenir; tarayıcı hafızası kullanılmaz.</p></article>
         </div>
+        <article class="panel" id="producedCostPanel">
+          <div class="section-heading">
+            <div><p class="eyebrow">ÜRETİM</p><h2>Üretilen ürünlerin maliyet tablosu</h2><p class="muted">Bu tablo yalnızca stokta hazır mamul olarak bulunan, yani fiilen üretilmiş ürünleri gösterir. Hiç üretim yoksa tüm değerler 0'dır.</p></div>
+            <span class="tag" id="producedCostTag">0 ürün</span>
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Ürün</th><th>Stok adet</th><th>Birim maliyet</th><th>Toplam maliyet</th><th>Birim satış fiyatı</th><th>Birim kâr</th></tr></thead>
+            <tbody id="producedCostRows"></tbody>
+          </table></div>
+          <div id="producedCostEmpty" class="empty-state">Henüz hiçbir ürün üretilmedi. Stokta ürün olmadığı için üretim maliyeti 0.</div>
+        </article>
       </section>
       <section class="page-section maintenance-page" id="maintenance">
         <section class="panel">
@@ -353,6 +369,36 @@
             <tbody id="purchaseRows"></tbody>
           </table></div>
           <div id="purchaseEmpty" class="empty-state">Henüz filament alımı yok. Yukarıdaki formdan alım girdiğinde burada görünür.</div>
+        </section>
+        <section class="panel" id="wastePanel">
+          <div class="section-heading">
+            <div><p class="eyebrow">ATIK &amp; HATALI BASKI</p><h2>Atık filament / hatalı baskı</h2><p class="muted">Hatalı baskıda harcanan filament gramını, baskı süresini ve makine amortismanını gir. Toplam maliyet (filament + amortisman + elektrik) net gelirden düşülür; gramaj seçilen renk stoğundan düşer.</p></div>
+            <span class="tag">Stoktan düşer</span>
+          </div>
+          <div class="note waste-edit-banner" id="wasteEditBanner" hidden>
+            <span><strong>Düzeltme modu:</strong> Bu kaydı değiştirdiğinde eski gramaj stoğa iade edilir, yeni gramaj stoktan düşülür.</span>
+            <button class="btn btn-ghost" id="wasteCancelEdit" type="button">Düzenlemeyi iptal et</button>
+          </div>
+          <form id="wasteForm" class="sales-form waste-form" novalidate>
+            <label class="field"><span>Renk</span><input id="wasteColor" type="text" list="stockColorList" maxlength="24" placeholder="Örn. Siyah" autocomplete="off" required></label>
+            <label class="field"><span>Atık / hatalı baskı gramajı <small>g</small></span><input id="wasteGrams" type="number" min="0.01" max="1000000" step="0.01" placeholder="Örn. 45" required></label>
+            <label class="field"><span>Baskı süresi <small>saat</small></span><input id="wasteHours" type="number" min="0" max="100000" step="0.1" value="0"></label>
+            <label class="field"><span>Makine amortismanı <small>TL · süreden otomatik, düzenlenebilir</small></span><input id="wasteAmortization" type="number" min="0" max="100000000" step="0.01" value="0"></label>
+            <label class="field"><span>Tarih</span><input id="wasteDate" type="date" required></label>
+            <label class="field sale-note-field"><span>Not (isteğe bağlı)</span><input id="wasteNote" type="text" maxlength="120" placeholder="Örn. Katman ayrılması, destek koptu"></label>
+            <button class="btn btn-primary sale-submit" type="submit" id="wasteSubmit"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Atık kaydını ekle ve stoktan düş</button>
+          </form>
+          <p class="note" id="wastePreview" aria-live="polite">Maliyet için renk ve gramaj gir.</p>
+          <div class="stock-cards waste-cards">
+            <article><span>Toplam atık maliyeti</span><strong id="wasteTotalCost">₺0,00</strong><small>Net gelirden düşülür</small></article>
+            <article><span>Toplam atık filament</span><strong id="wasteTotalGrams">0 g</strong><small>Stoktan düşen</small></article>
+            <article><span>Kayıt sayısı</span><strong id="wasteCount">0 kayıt</strong><small>Düzeltilebilir / geri alınabilir</small></article>
+          </div>
+          <div class="table-wrap"><table class="history-table waste-table">
+            <thead><tr><th>Tarih</th><th>Renk</th><th>Gram</th><th>Baskı saati</th><th>Filament</th><th>Amortisman</th><th>Elektrik</th><th>Toplam maliyet</th><th>Not</th><th></th></tr></thead>
+            <tbody id="wasteRows"></tbody>
+          </table></div>
+          <div id="wasteEmpty" class="empty-state">Henüz atık / hatalı baskı kaydı yok. Yukarıdaki formdan ilk kaydı ekleyebilirsin.</div>
         </section>
         <section class="panel">
           <div class="section-heading">
