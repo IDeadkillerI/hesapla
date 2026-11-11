@@ -20,6 +20,9 @@ function showPage(pageId) {
     if (active) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
   });
+  // Üst özet kartları (ürün çeşidi, hazır mamul, üretim maliyeti, net kâr) yalnızca Ürünler & Maliyetler sayfasında görünür.
+  const dashboard = document.getElementById('dashboard');
+  if (dashboard) dashboard.style.display = pageId === 'production' ? '' : 'none';
   const target = document.getElementById(pageId);
   if (target) target.scrollIntoView({behavior:'smooth', block:'start'});
   // Sayfaya her girişte grafikler sıfırdan dolar.
