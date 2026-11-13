@@ -611,6 +611,77 @@ function commitSaleWithFinishedStock(record, requirements, maintenanceShare = 0)
   return acquireRootCache().then(release => runAttempt(0).finally(release));
 }
 
+/**
+ * Satış kaydını siler ve satışın düştüğü mamul stoğu geri yükler (tek transaction).
+ * - Tekli satış: productId/qty kadar readyStock artar.
+ * - Paket satışı: her kalem için item.qty × paket adedi kadar readyStock artar.
+ * - Satışın bakım fonuna aktardığı pay (maintenanceShare) fondan geri düşülür.
+ * - Kayıt zaten silinmişse hiçbir şey yapılmaz (çift iade engellenir).
+ * - Ürün sonradan silinmişse o kalemin iadesi atlanır, satış yine silinir.
+ */
+function deleteSaleWithStockRestore(saleId, sale) {
+  if (!cloudReady || !rootRef) return Promise.reject(new Error('Bulut bağlantısı kurulmadan satış silinemez.'));
+  const restoreList = [];
+  if (sale?.type === 'package') {
+    const packs = Math.max(1, Math.floor(Number(sale.qty) || 1));
+    packageItemsOf(sale).forEach(item => {
+      if (item.qty > 0) restoreList.push({productId: item.productId, name: item.name, qty: Math.floor(item.qty * packs)});
+    });
+  } else {
+    const qty = Math.max(0, Math.floor(Number(sale?.qty) || 0));
+    if (qty > 0) restoreList.push({productId: sale.productId, name: sale.productName, qty});
+  }
+  const share = Math.max(0, Number(sale?.maintenanceShare) || 0);
+
+  const runAttempt = attempt => new Promise((resolve, reject) => {
+    let missing = false;
+    rootRef.transaction(current => {
+      missing = false;
+      const root = current || {};
+      if (!root.sales || !root.sales[saleId]) { missing = true; return; }
+      const products = {...(root.products || {})};
+      restoreList.forEach(req => {
+        const key = matchProductKey(products, req.productId, req.name);
+        if (!key) return; // ürün silinmiş: iade edilecek yer yok
+        const product = products[key];
+        products[key] = {...product, readyStock: readyStockOf(product) + req.qty};
+      });
+      root.products = products;
+      const sales = {...root.sales};
+      delete sales[saleId];
+      root.sales = sales;
+      if (share > 0) {
+        const fund = root.maintenanceFund && typeof root.maintenanceFund === 'object' ? root.maintenanceFund : {};
+        root.maintenanceFund = {
+          ...fund,
+          balance: round2((Number(fund.balance) || 0) - share),
+          totalAccrued: round2(Math.max(0, (Number(fund.totalAccrued) || 0) - share)),
+          updatedAt: Date.now()
+        };
+      }
+      return root;
+    }, (error, committed) => {
+      if (error) {
+        if (attempt < TX_MAX_ATTEMPTS - 1 && txShouldRetry(error)) {
+          setTimeout(() => runAttempt(attempt + 1).then(resolve, reject), txRetryDelay(attempt));
+          return;
+        }
+        reject(error); return;
+      }
+      if (!committed) {
+        if (missing) { resolve(false); return; }
+        if (attempt < TX_MAX_ATTEMPTS - 1) {
+          setTimeout(() => runAttempt(attempt + 1).then(resolve, reject), txRetryDelay(attempt));
+          return;
+        }
+        reject(new Error('transaction-aborted')); return;
+      }
+      resolve(true);
+    }, false);
+  });
+  return acquireRootCache().then(release => runAttempt(0).finally(release));
+}
+
 // Üretimde kullanılacak renk tüketimini [{name, grams}] biçimine getirir.
 function normalizeColorUsage(colorUsageMap) {
   const list = Array.isArray(colorUsageMap)
@@ -1242,7 +1313,14 @@ function undoableDelete(type, id, record, ref, label) {
       try { await ref.set(record); toast('Kayıt geri yüklendi.','success'); }
       catch(error){cloudError(error,'kaydı geri yükleme');}
     } else {
-      try { await ref.remove(); toast('Kayıt silindi.','success'); }
+      try {
+        if (type==='sale') {
+          await deleteSaleWithStockRestore(id, record);
+          toast('Satış silindi; ürün adedi mamul stoğa iade edildi.','success');
+        } else {
+          await ref.remove(); toast('Kayıt silindi.','success');
+        }
+      }
       catch(error){pendingDeletes.set(key,pending); if(type==='product')state.products.push({...record,id});else sales.push({...record,id});renderProducts();renderSales();cloudError(error,'kayıt silme');}
     }
   };
