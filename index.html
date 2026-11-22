@@ -151,7 +151,7 @@
 
       <section class="panel" id="products">
         <div class="section-heading product-heading"><div><p class="eyebrow">02 / ÜRÜNLER</p><h2>Ürün maliyet tablosu</h2><p class="muted">Adet, toplam gram, partinin toplam baskı süresi ve satış fiyatını gir. Süreye bağlı giderler adede bölünerek birim maliyet ve tahmini kâr otomatik hesaplanır.</p></div><button class="btn btn-primary" id="addProduct"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Yeni ürün</button></div>
-        <div class="table-toolbar"><div class="searchbox"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg><input id="searchInput" placeholder="Ürün ara..."></div><span class="muted" id="rowCount">2 ürün</span></div>
+        <div class="table-toolbar"><div class="searchbox"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg><input id="searchInput" placeholder="Ürün ara..."></div><div class="toolbar-right"><button class="btn btn-ghost sort-btn" id="productSortBtn" type="button" title="Ürünleri sırala" aria-live="polite">Sırala: Varsayılan</button><span class="muted" id="rowCount">2 ürün</span></div></div>
         <div class="bulk-toolbar" id="productBulkToolbar" hidden><span id="productBulkCount">0 ürün seçildi</span><label class="bulk-raise">Zam (%) <input id="productBulkPercent" type="number" min="0" max="500" step="0.1" value="10"></label><button class="btn btn-ghost" id="productBulkRaise" type="button">Fiyatları güncelle</button><button class="btn btn-danger" id="productBulkDelete" type="button">Seçilenleri sil</button><button class="btn btn-ghost" id="productBulkClear" type="button">Seçimi temizle</button></div><div class="table-wrap"><table>
           <thead><tr><th><input type="checkbox" id="productSelectAll" aria-label="Tüm ürünleri seç"></th><th>Fotoğraf</th><th>Ürün adı</th><th>Adet</th><th>Toplam gram</th><th>Baskı süresi (saat)</th><th>Gram / adet</th><th>Renkler</th><th>Filament / adet</th><th>Elektrik / adet</th><th>Stand / adet</th><th>Amortisman / adet</th><th>Aşınma / adet</th><th>Fire payı / adet</th><th>Çakmak / adet</th><th>Birim maliyet</th><th>Satış fiyatı</th><th>Birim kâr</th><th>Toplam maliyet</th><th></th></tr></thead>
           <tbody id="productRows"></tbody>
@@ -187,7 +187,10 @@
             <div><button type="button" class="btn btn-ghost" id="pkgAddItem">＋ Ürün ekle</button></div>
           </div>
           <div class="pkg-summary-grid" id="pkgSummary" aria-live="polite"></div>
-          <button class="btn btn-primary sale-submit" type="submit"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Paket satışını kaydet</button>
+          <div class="sale-submit-group">
+            <button class="btn btn-ghost cari-sale-btn" id="cariSaleBtn" type="button" title="Gelecek tarihli cari satış oluştur (ödemesi sonra işlenir)"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Cari satış kaydet</button>
+            <button class="btn btn-primary sale-submit" type="submit"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Paket satışını kaydet</button>
+          </div>
         </form>
         <div class="sales-stats">
           <article><span>Satış adedi</span><strong id="salesUnits">0</strong></article>
@@ -567,6 +570,17 @@
       </div>
     </section>
   </div>
+  <!-- Cari satış tarih doğrulama hatası: tek "Tamam" düğmesi ve tam metin. -->
+  <div class="confirm-backdrop" id="cariErrorModal" hidden>
+    <section class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="cariErrorTitle" aria-describedby="cariErrorMessage">
+      <span class="confirm-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v5M12 16.5v.5"/><path d="M10.3 3.9 2.4 17.5A1.8 1.8 0 0 0 3.9 20h16.2a1.8 1.8 0 0 0 1.5-2.5L13.7 3.9a1.9 1.9 0 0 0-3.4 0Z"/></svg></span>
+      <h3 id="cariErrorTitle">Cari satış yapılamaz</h3>
+      <p id="cariErrorMessage">aynı gün için ve geçmişe dönük günler için cari satış yapılamaz</p>
+      <div class="confirm-actions confirm-actions-single">
+        <button class="btn btn-primary" id="cariErrorOk" type="button">Tamam</button>
+      </div>
+    </section>
+  </div>
   <!-- SheetJS yereldir (vendor/xlsx.full.min.js) ve yalnızca Excel dışa aktarımında
        script.js tarafından isteğe bağlı yüklenir. CDN kullanılmadığı için tarayıcı
        gizlilik/tracking koruması depolama erişimini engellemez. -->
@@ -574,6 +588,6 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
   <script src="firebase-config.js"></script>
   <!-- Sürüm parametresi, tarayıcının eski script.js önbelleğini kullanmasını engeller. -->
-  <script src="script.js?v=20261111-1"></script>
+  <script src="script.js?v=20261122-1"></script>
 </body>
 </html>

@@ -23,6 +23,9 @@ function showPage(pageId) {
   // Üst özet kartları (ürün çeşidi, hazır mamul, üretim maliyeti, net kâr) yalnızca Ürünler & Maliyetler sayfasında görünür.
   const dashboard = document.getElementById('dashboard');
   if (dashboard) dashboard.style.display = pageId === 'production' ? '' : 'none';
+  // Sağ üstteki "Ürün ekle" (üret) düğmesi yalnızca ana sayfada görünür.
+  const topActions = document.querySelector('.top-actions');
+  if (topActions) topActions.style.display = pageId === 'production' ? '' : 'none';
   const target = document.getElementById(pageId);
   if (target) target.scrollIntoView({behavior:'smooth', block:'start'});
   // Sayfaya her girişte grafikler sıfırdan dolar.
@@ -49,6 +52,8 @@ const defaults = {
 const clone = value => JSON.parse(JSON.stringify(value));
 let state = {...clone(defaults), products: []};
 let sales = [];
+// Ürün maliyet tablosu sıralaması: düğme her basışta modlar arasında döner.
+let productSortMode = 'default';
 let costHistory = [];
 // Üretim kayıtları (printcost/productionLogs). Satıştan bağımsız üretim hareketleri.
 let productionLogs = [];
@@ -1751,6 +1756,37 @@ function stockCalc(x=params()) {
   const neededKg = items.reduce((sum,item)=>sum+item.plannedKg,0);
   return {stockKg,neededKg,remaining:stockKg-neededKg,items,colorRows,minStockKg:Math.max(0,Number(state.minStockKg)||0),waste,wasteRate:x.wasteRate};
 }
+const PRODUCT_SORT_MODES = [
+  {key:'default', label:'Varsayılan'},
+  {key:'stock-asc', label:'Stok: Azdan çoka'},
+  {key:'stock-desc', label:'Stok: Çoktan aza'},
+  {key:'cost-desc', label:'Maliyet: Çoktan aza'},
+  {key:'cost-asc', label:'Maliyet: Azdan çoka'}
+];
+function sortedProductsForTable(x) {
+  const list = [...state.products];
+  if (productSortMode === 'default') return list;
+  const stockOf = p => readyStockOf(p);
+  const costOf = p => calc(p, x).unit;
+  if (productSortMode === 'stock-asc') list.sort((a,b) => stockOf(a) - stockOf(b));
+  else if (productSortMode === 'stock-desc') list.sort((a,b) => stockOf(b) - stockOf(a));
+  else if (productSortMode === 'cost-desc') list.sort((a,b) => costOf(b) - costOf(a));
+  else if (productSortMode === 'cost-asc') list.sort((a,b) => costOf(a) - costOf(b));
+  return list;
+}
+function syncProductSortButton() {
+  const btn = $('productSortBtn');
+  if (!btn) return;
+  const mode = PRODUCT_SORT_MODES.find(m => m.key === productSortMode) || PRODUCT_SORT_MODES[0];
+  btn.textContent = `Sırala: ${mode.label}`;
+  btn.classList.toggle('is-active', productSortMode !== 'default');
+}
+function cycleProductSort() {
+  const index = PRODUCT_SORT_MODES.findIndex(m => m.key === productSortMode);
+  productSortMode = PRODUCT_SORT_MODES[(index + 1) % PRODUCT_SORT_MODES.length].key;
+  syncProductSortButton();
+  renderProducts();
+}
 function renderProducts() {
   const x = params();
   const rates = hourlyRates(x);
@@ -1763,7 +1799,8 @@ function renderProducts() {
   if ($('hourlyWear')) $('hourlyWear').textContent = `${money(rates.wear)} / saat`;
   const query = $('searchInput').value.trim().toLocaleLowerCase('tr-TR');
   const rows = $('productRows'); rows.innerHTML = '';
-  state.products.forEach(p => {
+  syncProductSortButton();
+  sortedProductsForTable(x).forEach(p => {
     p.usesLighter = Boolean(p.usesLighter);
     if (!String(p.name ?? '').toLocaleLowerCase('tr-TR').includes(query)) return;
     const c = calc(p,x);
@@ -2104,6 +2141,10 @@ function getPeriodBounds(period) {
   return {start,end,label:start.toLocaleDateString('tr-TR',{month:'long',year:'numeric'})};
 }
 function dateLabel(date) { return date.toLocaleDateString('tr-TR',{day:'2-digit',month:'2-digit',year:'numeric'}); }
+// Cari satış: gelecek tarihli, parasal etkileri "Satışı gerçekleştir" denene kadar işlenmeyen satış.
+function isCariPending(sale) {
+  return Boolean(sale && sale.cari && sale.cariState !== 'realized');
+}
 function filteredSales() {
   const period = $('salesPeriod').value;
   const bounds = getPeriodBounds(period);
@@ -2117,10 +2158,12 @@ function filteredSales() {
 function renderSales() {
   const {records,bounds} = filteredSales();
   $('salesRange').textContent = bounds.label;
+  // Bekleyen cari satışlar listede görünür ama parasal toplamlara, kâra ve grafiğe işlenmez.
+  const monetary = records.filter(s => !isCariPending(s));
   const qty = records.reduce((sum,s)=>sum+(Number(s.unitsTotal ?? s.qty)||0),0);   // paketlerde içerdeki ürün adetleri sayılır
-  const revenue = records.reduce((sum,s)=>sum+(Number(s.revenue)||0),0);
-  const cost = records.reduce((sum,s)=>sum+(Number(s.totalCost)||0),0);
-  const profit = records.reduce((sum,s)=>sum+(Number(s.profit)||0),0);
+  const revenue = monetary.reduce((sum,s)=>sum+(Number(s.revenue)||0),0);
+  const cost = monetary.reduce((sum,s)=>sum+(Number(s.totalCost)||0),0);
+  const profit = monetary.reduce((sum,s)=>sum+(Number(s.profit)||0),0);
   $('salesUnits').textContent = fmt(qty,0); $('salesRevenue').textContent = money(revenue);
   $('salesCost').textContent = money(cost); $('salesProfit').textContent = money(profit);
   // Seçili dönemdeki filament alım ve atık / hatalı baskı giderleri ile gider sonrası bakiye.
@@ -2135,13 +2178,23 @@ function renderSales() {
     $('salesAfterExpense').classList.toggle('profit-positive', after >= 0);
   }
   // Ana sayfadaki kâr kartı, dönem filtresinden bağımsız olarak gerçek satış kayıtlarından gelir.
-  const allProfit = sales.reduce((sum, s) => sum + (Number(s.profit) || 0), 0);
+  const realizedAll = sales.filter(s => !isCariPending(s));
+  const allProfit = realizedAll.reduce((sum, s) => sum + (Number(s.profit) || 0), 0);
   $('statProfit').textContent = money(allProfit);
-  $('statProfitCaption').textContent = sales.length ? `Yapılan ${sales.length} satış kaydından` : 'Henüz satış kaydı yok';
+  $('statProfitCaption').textContent = realizedAll.length ? `Yapılan ${realizedAll.length} satış kaydından` : 'Henüz satış kaydı yok';
   $('salesEmpty').style.display = records.length ? 'none' : 'block';
-  $('salesRows').innerHTML = records.map(s=>`<tr class="${s.type==='package'?'is-package':''}">
-    <td><input type="checkbox" class="row-select" data-select-sale="${esc(s.id)}" aria-label="Satışı seç" ${selectedSales.has(String(s.id))?'checked':''}></td><td>${esc(s.date)}</td><td>${saleNameCell(s)}</td><td>${saleQtyCell(s)}</td><td>${money(s.unitPrice)}</td><td class="money">${money(s.revenue)}</td><td>${money(s.unitCost)}</td><td>${money(s.totalCost)}</td><td class="${s.profit>=0?'profit-positive':'profit-negative'}">${money(s.profit)}</td><td>${esc(s.note||'')}</td><td><div class="sale-actions"><button class="detail-btn" data-sale-detail="${esc(s.id)}" type="button">Fiyat detayı</button>${s.type==='package' ? `<button class="detail-btn resell-btn" data-sale-resell="${esc(s.id)}" type="button">Tekrar sat</button>` : ''}</div></td><td><button class="delete-btn" data-sale-delete="${esc(s.id)}" title="Satış kaydını sil" aria-label="Satış kaydını sil">×</button></td>
-  </tr>`).join('');
+  $('salesRows').innerHTML = records.map(s=>{
+    const cariPending = isCariPending(s);
+    const dash = '<span class="muted">—</span>';
+    const moneyCell = value => cariPending ? dash : money(value);
+    const rowActions = `<div class="sale-actions"><button class="detail-btn" data-sale-detail="${esc(s.id)}" type="button">Fiyat detayı</button>${!cariPending && s.type==='package' ? `<button class="detail-btn resell-btn" data-sale-resell="${esc(s.id)}" type="button">Tekrar sat</button>` : ''}${cariPending ? `<button class="detail-btn cari-realize-btn" data-sale-realize="${esc(s.id)}" type="button">Satışı gerçekleştir</button>` : ''}</div>`;
+    const lastCell = cariPending
+      ? `<button class="delete-btn cari-cancel-btn" data-sale-cari-cancel="${esc(s.id)}" title="Cari satışı iptal et" aria-label="Cari satışı iptal et">Cari satış iptal</button>`
+      : `<button class="delete-btn" data-sale-delete="${esc(s.id)}" title="Satış kaydını sil" aria-label="Satış kaydını sil">×</button>`;
+    return `<tr class="${s.type==='package'?'is-package':''}${cariPending?' is-cari-pending':''}">
+    <td><input type="checkbox" class="row-select" data-select-sale="${esc(s.id)}" aria-label="Satışı seç" ${selectedSales.has(String(s.id))?'checked':''}></td><td>${esc(s.date)}</td><td>${saleNameCell(s)}</td><td>${saleQtyCell(s)}</td><td>${moneyCell(s.unitPrice)}</td><td class="money">${moneyCell(s.revenue)}</td><td>${moneyCell(s.unitCost)}</td><td>${moneyCell(s.totalCost)}</td><td class="${!cariPending && s.profit>=0?'profit-positive':''}${!cariPending && s.profit<0?'profit-negative':''}">${moneyCell(s.profit)}</td><td>${esc(s.note||'')}</td><td>${rowActions}</td><td>${lastCell}</td>
+  </tr>`;
+  }).join('');
   refreshTableLabels($('salesRows')?.closest('table')); syncBulkToolbars();
   renderCostHistory();
   renderSalesChart();
@@ -2429,6 +2482,10 @@ $('salesRows').addEventListener('click',event=>{
   if(detailButton){showSaleDetails(detailButton.dataset.saleDetail);return;}
   const resellButton=event.target.closest('[data-sale-resell]');
   if(resellButton){openRepackageSale(resellButton.dataset.saleResell);return;}
+  const realizeButton=event.target.closest('[data-sale-realize]');
+  if(realizeButton){realizeCariSale(realizeButton.dataset.saleRealize);return;}
+  const cariCancelButton=event.target.closest('[data-sale-cari-cancel]');
+  if(cariCancelButton){cancelCariSale(cariCancelButton.dataset.saleCariCancel);return;}
   const button=event.target.closest('[data-sale-delete]'); if(!button)return;
   const record=sales.find(s=>String(s.id)===button.dataset.saleDelete);
   if (!cloudReady) { toast('Bulut bağlantısı kurulmadan satış silinemez.'); return; }
@@ -2481,7 +2538,11 @@ $('productBulkDelete')?.addEventListener('click',async()=>{
   selectedProducts.clear(); targets.forEach(p=>{const copy={...p};delete copy.id;undoableDelete('product',p.id,copy,productsRef.child(p.id),`“${p.name||'Ürün'}”`);});
 });
 $('salesBulkDelete')?.addEventListener('click',async()=>{
-  const targets=sales.filter(s=>selectedSales.has(String(s.id))); if(!targets.length)return;
+  const targets=sales.filter(s=>selectedSales.has(String(s.id)) && !isCariPending(s));
+  if(!targets.length){
+    if (sales.some(s=>selectedSales.has(String(s.id)) && isCariPending(s))) toast('Bekleyen cari satışlar toplu silinemez; satırındaki "Cari satış iptal" düğmesini kullan.', 'warning');
+    return;
+  }
   if(!await confirmDialog({title:'Toplu satış silme',message:`${targets.length} satış kaydı 5 saniye boyunca geri alınabilir şekilde silinecek. Bu işlem için admin şifresi gerekli.`,confirmText:'Seçilenleri sil',danger:true,requirePassword:true}))return;
   selectedSales.clear(); targets.forEach(s=>{const copy={...s};delete copy.id;undoableDelete('sale',s.id,copy,salesRef.child(s.id),`“${s.productName||'Satış'}”`);});
 });
@@ -2506,6 +2567,7 @@ document.addEventListener('keydown',event=>{
 });
 $('addProduct').addEventListener('click',addProduct); $('addProductTop').addEventListener('click',addProduct);
 $('searchInput').addEventListener('input',renderProducts);
+if ($('productSortBtn')) $('productSortBtn').addEventListener('click',cycleProductSort);
 $('saleDate').value=todayISO();
 if ($('stockAddDate')) $('stockAddDate').value=todayISO();
 if ($('stockAddPrice')) $('stockAddPrice').value=state.filamentPrice ?? defaults.filamentPrice;
@@ -3450,6 +3512,8 @@ function buildSalesBuckets(range) {
   }
   const map = new Map(list.map(b => [b.key, b]));
   sales.forEach(s => {
+    // Bekleyen cari satışlar grafiğe işlenmez; gerçekleştirilince dahil olur.
+    if (isCariPending(s)) return;
     const date = localDate(s.date);
     if (!date) return;
     const bucket = map.get(bucketKeyOf(date, range));
@@ -3611,7 +3675,7 @@ function renderSalesChart(forceMode) {
   const totalRev = SC.to.rev.reduce((a, b) => a + b, 0), totalProf = SC.to.prof.reduce((a, b) => a + b, 0);
   $('salesChartCaption').textContent = `${SC_RANGES[SC.range].label} · Ciro ${money(totalRev)} · Net kâr ${money(totalProf)}`;
   $('salesChartSvg').setAttribute('aria-label', `Satış grafiği: ${SC_RANGES[SC.range].label}, toplam ciro ${money(totalRev)}, net kâr ${money(totalProf)}`);
-  const has = sales.length > 0;
+  const has = sales.some(s => !isCariPending(s));
   $('salesChartEmpty').style.display = has ? 'none' : 'block';
   $('salesChartStage').style.display = has ? '' : 'none';
   syncSalesChartControls();
@@ -3627,7 +3691,7 @@ function playSalesChart(animate) {
   if (!$('salesChartCard')) return;
   computeSalesTarget();
   SC.sig = salesChartSignature();
-  if (!sales.length) return;
+  if (!sales.some(s => !isCariPending(s))) return;
   retargetSalesChart('zero', animate);
 }
 function initSalesChartUi() {
@@ -3770,9 +3834,31 @@ function setSaleMode(mode) {
   syncSlidingPills();
   if (pkgOn) syncPackageProducts();
 }
-function savePackageSale(event) {
+function showCariDateError() {
+  const modal = $('cariErrorModal');
+  if (!modal) return;
+  modal.hidden = false;
+  setTimeout(() => { const ok = $('cariErrorOk'); if (ok) ok.focus(); }, 0);
+}
+function closeCariDateError() {
+  const modal = $('cariErrorModal');
+  if (modal) modal.hidden = true;
+  setSaleMode('package');
+  const dateInput = $('pkgDate');
+  if (dateInput) dateInput.focus({ preventScroll: true });
+  const form = $('packageForm');
+  if (form) form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  toast('Cari satış için lütfen gelecekte bir tarih seç.', 'info', { title: 'Tarihi değiştir' });
+}
+function savePackageSale(event, cariSale = false) {
   event.preventDefault();
   if (!cloudReady) { toast('Bulut bağlantısı kurulmadan satış kaydedilemez.'); return; }
+  // Cari satış yalnızca gelecek tarihli olabilir; aynı gün ve geçmiş tarihler reddedilir.
+  const saleDate = $('pkgDate').value || todayISO();
+  if (cariSale && saleDate <= todayISO()) {
+    showCariDateError();
+    return;
+  }
   if (!validateFormInputs($('packageForm'))) return;
   const c = pkgCompute();
   if (!c.lines.length || c.lines.some(l => !l.p || l.qty < 1)) {
@@ -3804,14 +3890,17 @@ function savePackageSale(event) {
   const typedName = $('pkgName').value.trim();
   const record = {
     type: 'package',
-    date: $('pkgDate').value || todayISO(),
+    date: saleDate,
     packageName: typedName || '',
     productName: typedName || items.map(i => `${i.name} ×${i.qty}`).join(' + '),
     items,
     qty: c.pq, unitsTotal: perPackageUnits * c.pq,
     unitPrice: c.price, unitCost: c.cost,
     revenue: c.revenue, totalCost: c.totalCost, profit: c.totalProfit,
-    maintenanceShare,
+    // Cari satışta parasal veriler kayıtta durur ama cariState "realized" olana kadar
+    // hiçbir toplama, kâra, bakım fonuna veya grafiğe işlenmez.
+    maintenanceShare: cariSale ? 0 : maintenanceShare,
+    ...(cariSale ? { cari: true, cariState: 'pending', cariMaintenanceShare: maintenanceShare, cariCreatedAt: Date.now() } : {}),
     note: $('pkgNote').value.trim(), createdAt: Date.now(),
     costSnapshot: {
       params: clone(x),
@@ -3828,20 +3917,108 @@ function savePackageSale(event) {
   const requirements = lines.map(line => ({
     productId: line.p.id, name: line.p.name || 'İsimsiz ürün', qty: line.qty * c.pq
   }));
-  commitSaleWithFinishedStock(record, requirements, maintenanceShare)
+  commitSaleWithFinishedStock(record, requirements, cariSale ? 0 : maintenanceShare)
     .then(() => {
       PKG.items = [{productId:'', qty:1}];
       $('pkgName').value = ''; $('pkgNote').value = ''; $('pkgQty').value = 1; $('pkgPrice').value = 0;
       $('pkgDate').value = todayISO();
       renderPackageRows();
-      toast(`Paket satışı buluta kaydedildi. Net kâr: ${money(record.profit)}${maintenanceShare > 0 ? ` · Bakım fonuna ${money(maintenanceShare)} aktarıldı` : ''}`);
+      toast(cariSale
+        ? `Cari satış oluşturuldu (${saleDate}). Ürün stoktan düşüldü; parasal veriler "Satışı gerçekleştir" düğmesine basılana kadar işlenmeyecek.`
+        : `Paket satışı buluta kaydedildi. Net kâr: ${money(record.profit)}${maintenanceShare > 0 ? ` · Bakım fonuna ${money(maintenanceShare)} aktarıldı` : ''}`,
+        cariSale ? 'info' : 'success', cariSale ? { title: 'Cari satış bekliyor', duration: 7000 } : undefined);
     })
     .catch(error => { if(!['insufficient-finished-stock','offline-stock-guard','transaction-aborted'].includes(error.message)) cloudError(error, 'paket satışı kaydetme'); });
 }
+/* Bekleyen cari satışı, normal satış gibi muhasebeleştirir.
+   Tek atomik transaction: cariState 'realized' olur, bakım fonu payı havuza eklenir.
+   Ciro / maliyet / kâr alanları kayıtta zaten saklı olduğu için bu andan sonra
+   tüm toplamlara ve grafiğe dahil olur. */
+function realizeCariSale(saleId) {
+  if (!cloudReady || !rootRef) { toast('Bulut bağlantısı kurulmadan satış gerçekleştirilemez.'); return; }
+  if (!firebaseConnected || navigator.onLine === false) {
+    toast('Bağlantı yok. Cari satış bağlantı gelene kadar gerçekleştirilemez.', 'warning');
+    return;
+  }
+  let credited = 0;
+  const runAttempt = attempt => new Promise((resolve, reject) => {
+    let missing = false, already = false;
+    credited = 0;
+    rootRef.transaction(current => {
+      missing = false; already = false; credited = 0;
+      const root = current || {};
+      const record = root.sales && root.sales[saleId];
+      if (!record) { missing = true; return; }
+      if (!(record.cari && record.cariState !== 'realized')) { already = true; return; }
+      const share = Math.max(0, Number(record.cariMaintenanceShare ?? record.maintenanceShare) || 0);
+      root.sales = { ...root.sales, [saleId]: { ...record, cariState: 'realized', realizedAt: Date.now(), maintenanceShare: share } };
+      if (share > 0) {
+        credited = share;
+        const fund = root.maintenanceFund && typeof root.maintenanceFund === 'object' ? root.maintenanceFund : {};
+        root.maintenanceFund = {
+          ...fund,
+          balance: round2((Number(fund.balance) || 0) + share),
+          totalAccrued: round2((Number(fund.totalAccrued) || 0) + share),
+          updatedAt: Date.now()
+        };
+      }
+      return root;
+    }, (error, committed) => {
+      if (error) {
+        if (attempt < TX_MAX_ATTEMPTS - 1 && txShouldRetry(error)) {
+          setTimeout(() => runAttempt(attempt + 1).then(resolve, reject), txRetryDelay(attempt));
+          return;
+        }
+        cloudError(error, 'cari satışı gerçekleştirme');
+        reject(error); return;
+      }
+      if (!committed) {
+        if (missing) { resolve('missing'); return; }
+        if (already) { resolve('already'); return; }
+        if (attempt < TX_MAX_ATTEMPTS - 1) {
+          setTimeout(() => runAttempt(attempt + 1).then(resolve, reject), txRetryDelay(attempt));
+          return;
+        }
+        reject(new Error('transaction-aborted')); return;
+      }
+      resolve('done');
+    }, false);
+  });
+  acquireRootCache().then(release => runAttempt(0).finally(release))
+    .then(result => {
+      if (result === 'done') toast(`Cari satış gerçekleştirildi; ciro, maliyet ve kâr normal satış gibi işlendi.${credited > 0 ? ` Bakım fonuna ${money(credited)} aktarıldı.` : ''}`, 'success');
+      else if (result === 'already') toast('Bu cari satış zaten gerçekleştirilmiş.', 'info');
+      else if (result === 'missing') toast('Cari satış kaydı bulunamadı.', 'warning');
+    })
+    .catch(error => { if (!['transaction-aborted'].includes(error.message)) cloudError(error, 'cari satışı gerçekleştirme'); });
+}
+/* Cari satışı iptal eder: önce uyarı sorar, onaylanırsa kaydı siler ve
+   stoktan düşülen ürünleri mamul stoğuna geri ekler. */
+function cancelCariSale(saleId) {
+  const record = sales.find(s => String(s.id) === String(saleId));
+  if (!record || !isCariPending(record)) { toast('İptal edilecek bekleyen cari satış bulunamadı.', 'warning'); return; }
+  if (!cloudReady || !rootRef) { toast('Bulut bağlantısı kurulmadan cari satış iptal edilemez.'); return; }
+  confirmDialog({
+    title: 'Cari satışı iptal et',
+    message: `“${record.productName || 'Cari satış'}” kaydı iptal edilecek. Satış için stoktan düşülen ürünler mamul stoğuna geri eklenecek. Bu işlem geri alınamaz.`,
+    confirmText: 'Cari satışı iptal et',
+    cancelText: 'Vazgeç',
+    danger: true
+  }).then(ok => {
+    if (!ok) return;
+    deleteSaleWithStockRestore(record.id, record)
+      .then(deleted => {
+        if (deleted === false) toast('Cari satış kaydı zaten silinmiş.', 'info');
+        else toast('Cari satış iptal edildi; ürünler mamul stoğuna geri eklendi.', 'success');
+      })
+      .catch(error => { if (!['transaction-aborted'].includes(error.message)) cloudError(error, 'cari satışı iptal etme'); });
+  });
+}
 function saleNameCell(sale) {
-  if (sale.type !== 'package') return esc(sale.productName);
+  const cariBadge = isCariPending(sale) ? '<span class="sale-badge cari">Cari · bekliyor</span>' : '';
+  if (sale.type !== 'package') return `${cariBadge}${esc(sale.productName)}`;
   const contents = packageItemsOf(sale).map(i => `${esc(i.name)} ×${fmt(i.qty, 0)}`).join(' + ');
-  return `<span class="sale-badge package">Paket</span>${esc(sale.productName)}${contents ? `<small class="pkg-contents">${contents}</small>` : ''}`;
+  return `${cariBadge}<span class="sale-badge package">Paket</span>${esc(sale.productName)}${contents ? `<small class="pkg-contents">${contents}</small>` : ''}`;
 }
 function saleQtyCell(sale) {
   return sale.type === 'package' ? `${fmt(sale.qty, 0)} paket` : fmt(sale.qty, 0);
@@ -3937,6 +4114,8 @@ function initPackageUi() {
     }
   });
   form.addEventListener('submit', savePackageSale);
+  if ($('cariSaleBtn')) $('cariSaleBtn').addEventListener('click', () => savePackageSale({ preventDefault() {} }, true));
+  if ($('cariErrorOk')) $('cariErrorOk').addEventListener('click', closeCariDateError);
   $('pkgDate').value = todayISO();
 }
 
@@ -4163,7 +4342,7 @@ async function exportExcel() {
       [12, 30, 8, 50, 14, 22]);
     addSheet('Satislar',
       ['Tarih', 'Tür', 'Ürün / paket', 'Adet', 'Satılan birim', 'Birim fiyat (TL)', 'Ciro (TL)', 'Birim maliyet (TL)', 'Toplam maliyet (TL)', 'Net kâr (TL)', 'Bakım payı (TL)', 'Not'],
-      sales.map(sale => [sale.date || '', sale.type === 'package' ? 'Paket' : 'Tekli', sale.productName || '',
+      sales.filter(sale => !isCariPending(sale)).map(sale => [sale.date || '', sale.type === 'package' ? 'Paket' : 'Tekli', sale.productName || '',
         Number(sale.qty) || 0, Number(sale.unitsTotal ?? sale.qty) || 0, round2(sale.unitPrice),
         round2(sale.revenue), round2(sale.unitCost), round2(sale.totalCost), round2(sale.profit),
         round2(sale.maintenanceShare), sale.note || '']),
@@ -4217,7 +4396,7 @@ function exportCsv() {
     });
   } else {
     headers = ['Tarih', 'Ürün', 'Adet', 'Ciro', 'Toplam maliyet', 'Net kâr'];
-    rows = sales.map(sale => [sale.date || '', sale.productName || '', Number(sale.qty) || 0, round2(sale.revenue), round2(sale.totalCost), round2(sale.profit)]);
+    rows = sales.filter(sale => !isCariPending(sale)).map(sale => [sale.date || '', sale.productName || '', Number(sale.qty) || 0, round2(sale.revenue), round2(sale.totalCost), round2(sale.profit)]);
   }
   const csv = '﻿' + [headers, ...rows].map(row => row.map(csvEscape).join(';')).join('\r\n');
   downloadBlob(`PrintCost_${dataset}_${fileStamp()}.csv`, new Blob([csv], {type:'text/csv;charset=utf-8'}));
