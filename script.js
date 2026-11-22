@@ -8,6 +8,12 @@ const $ = id => document.getElementById(id);
  * Veri yolu: printcost/{params|filamentStock|filamentPurchases|products|sales|costHistory}
  * ========================================================= */
 const CLOUD_ROOT = 'printcost';
+// EmailJS — yalnızca vadesi gelmiş/gecikmiş bekleyen cari kayıt varsa ve o gün
+// henüz mail gönderilmediyse kullanılır. Sesli uyarı yoktur.
+const EMAILJS_PUBLIC_KEY = '8eKPDehzKtl3uxIsC';
+const EMAILJS_SERVICE_ID = 'service_6dg8ev5';
+const EMAILJS_TEMPLATE_ID = 'template_zymhg9q';
+const CARI_MAIL_STORAGE_PREFIX = 'printcost_cari_mail_';
 
 // Sol menüdeki her seçenek ayrı bir sayfa görünümü açar.
 function showPage(pageId) {
@@ -54,6 +60,10 @@ let state = {...clone(defaults), products: []};
 let sales = [];
 // Ürün maliyet tablosu sıralaması: düğme her basışta modlar arasında döner.
 let productSortMode = 'default';
+// Kapatılan uyarı bandının hangi kayıt kümesi için kapatıldığı; veri değişince yeniden açılır.
+let cariAlertDismissedSig = '';
+let cariEmailInFlight = false;
+let cariEmailMemoryKey = '';
 let costHistory = [];
 // Üretim kayıtları (printcost/productionLogs). Satıştan bağımsız üretim hareketleri.
 let productionLogs = [];
@@ -222,6 +232,7 @@ function attachCloudListeners() {
     const value = snap.val() || {};
     sales = Object.entries(value).filter(([id]) => !pendingDeletes.has(`sale:${id}`)).map(([id, record]) => ({id, ...record}));
     renderSales();
+    refreshCariAlerts();
   }, error => cloudError(error, 'satışları okuma'));
 
   // Maliyet / fiyat geçmişi
@@ -2145,6 +2156,116 @@ function dateLabel(date) { return date.toLocaleDateString('tr-TR',{day:'2-digit'
 function isCariPending(sale) {
   return Boolean(sale && sale.cari && sale.cariState !== 'realized');
 }
+// Eski kayıtlarda müşteri adı yoksa hata vermeden "Belirtilmemiş" gösterilir.
+function saleCustomerName(sale) {
+  const name = String(sale && sale.customerName || '').trim();
+  return name || 'Belirtilmemiş';
+}
+function readCustomerName(inputId) {
+  const input = $(inputId);
+  return input ? input.value.trim().replace(/\s+/g, ' ') : '';
+}
+function warnMissingCustomer(inputId) {
+  const input = $(inputId);
+  if (input) {
+    input.classList.add('is-invalid');
+    input.setAttribute('aria-invalid', 'true');
+    input.focus();
+  }
+  toast('Müşteri adı zorunlu. Satışı kaydetmeden önce müşteri adını gir.', 'warning', { title: 'Müşteri adı gerekli' });
+}
+// Vadesi bugüne eşit veya geçmiş, ödenmemiş (bekleyen) cari satışlar.
+function cariOverdueSales() {
+  const today = todayISO();
+  return sales
+    .filter(sale => isCariPending(sale) && !sale.paid && localDate(sale.date) && String(sale.date) <= today)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || (a.createdAt || 0) - (b.createdAt || 0));
+}
+function cariDelayDays(sale) {
+  const due = localDate(sale && sale.date);
+  if (!due) return 0;
+  const today = new Date(); today.setHours(0, 0, 0, 0); due.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.round((today - due) / 86400000));
+}
+function cariDelayLabel(sale) {
+  const days = cariDelayDays(sale);
+  return days === 0 ? 'Bugün' : `${days} gün gecikme`;
+}
+function cariAlertSignature(records) {
+  return `${todayISO()}|${records.map(s => s.id).join(',')}`;
+}
+function hasCariMailBeenSent(key) {
+  if (cariEmailMemoryKey === key) return true;
+  try { return localStorage.getItem(key) === '1'; }
+  catch (e) { return false; }
+}
+function markCariMailSent(key) {
+  cariEmailMemoryKey = key;
+  try { localStorage.setItem(key, '1'); } catch (e) { /* depolama kapalıysa oturum içi koruma yeterli */ }
+}
+/* Gecikmiş cari kayıtları için görsel uyarı bandını günceller ve koşullar
+   uygunsa günde en fazla bir kez EmailJS bildirimi gönderir. */
+function refreshCariAlerts() {
+  const overdue = cariOverdueSales();
+  const banner = $('cariAlert');
+  if (!banner) return;
+  if (!overdue.length) {
+    banner.hidden = true;
+    cariAlertDismissedSig = '';
+    return;
+  }
+  const total = overdue.reduce((sum, sale) => sum + (Number(sale.revenue) || 0), 0);
+  const sig = cariAlertSignature(overdue);
+  if (cariAlertDismissedSig === sig) {
+    banner.hidden = true;
+  } else {
+    const meta = $('cariAlertMeta');
+    if (meta) meta.innerHTML = `<b>${overdue.length}</b> kayıt · Toplam <b>${money(total)}</b>`;
+    const list = $('cariAlertList');
+    if (list) {
+      list.innerHTML = overdue.map(sale => `<li>
+        <b>${esc(saleCustomerName(sale))}</b>
+        <span class="cari-alert-amount">${money(sale.revenue)}</span>
+        <span>Vade: ${esc(sale.date)}</span>
+        <span class="cari-alert-delay">${esc(cariDelayLabel(sale))}</span>
+      </li>`).join('');
+    }
+    banner.hidden = false;
+  }
+  maybeSendCariEmail(overdue);
+}
+/* Uygun kayıt yoksa çağrılmaz. Aynı gün başarılı gönderim yapıldıysa tekrar
+   gönderilmez; başarılı gönderim tarih bazlı localStorage anahtarına yazılır. */
+function maybeSendCariEmail(overdue) {
+  if (!overdue || !overdue.length) return;               // koşul yoksa EmailJS'e hiç dokunma
+  if (cariEmailInFlight) return;
+  const key = `${CARI_MAIL_STORAGE_PREFIX}${todayISO()}`;
+  if (hasCariMailBeenSent(key)) return;
+  const emailjsLib = window.emailjs;
+  if (!emailjsLib || typeof emailjsLib.send !== 'function') return;
+  const total = overdue.reduce((sum, sale) => sum + (Number(sale.revenue) || 0), 0);
+  const ozet = overdue.map((sale, index) =>
+    `${index + 1}) Müşteri: ${saleCustomerName(sale)} | Tutar: ${money(sale.revenue)} | Vade: ${sale.date} | ${cariDelayLabel(sale)}`
+  ).join('\n');
+  cariEmailInFlight = true;
+  emailjsLib.send(
+    EMAILJS_SERVICE_ID,
+    EMAILJS_TEMPLATE_ID,
+    {
+      tarih: new Date().toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric', weekday: 'long' }),
+      kayit_sayisi: String(overdue.length),
+      toplam_tutar: money(total),
+      cari_ozet: ozet
+    },
+    { publicKey: EMAILJS_PUBLIC_KEY }
+  ).then(() => {
+    markCariMailSent(key);
+  }).catch(error => {
+    console.warn('Cari vade e-posta bildirimi gönderilemedi:', error);
+  }).finally(() => {
+    cariEmailInFlight = false;
+  });
+}
 function filteredSales() {
   const period = $('salesPeriod').value;
   const bounds = getPeriodBounds(period);
@@ -2192,7 +2313,7 @@ function renderSales() {
       ? `<button class="delete-btn cari-cancel-btn" data-sale-cari-cancel="${esc(s.id)}" title="Cari satışı iptal et" aria-label="Cari satışı iptal et">Cari satış iptal</button>`
       : `<button class="delete-btn" data-sale-delete="${esc(s.id)}" title="Satış kaydını sil" aria-label="Satış kaydını sil">×</button>`;
     return `<tr class="${s.type==='package'?'is-package':''}${cariPending?' is-cari-pending':''}">
-    <td><input type="checkbox" class="row-select" data-select-sale="${esc(s.id)}" aria-label="Satışı seç" ${selectedSales.has(String(s.id))?'checked':''}></td><td>${esc(s.date)}</td><td>${saleNameCell(s)}</td><td>${saleQtyCell(s)}</td><td>${moneyCell(s.unitPrice)}</td><td class="money">${moneyCell(s.revenue)}</td><td>${moneyCell(s.unitCost)}</td><td>${moneyCell(s.totalCost)}</td><td class="${!cariPending && s.profit>=0?'profit-positive':''}${!cariPending && s.profit<0?'profit-negative':''}">${moneyCell(s.profit)}</td><td>${esc(s.note||'')}</td><td>${rowActions}</td><td>${lastCell}</td>
+    <td><input type="checkbox" class="row-select" data-select-sale="${esc(s.id)}" aria-label="Satışı seç" ${selectedSales.has(String(s.id))?'checked':''}></td><td>${esc(s.date)}</td><td class="customer-cell${saleCustomerName(s)==='Belirtilmemiş'?' is-unknown':''}">${esc(saleCustomerName(s))}</td><td>${saleNameCell(s)}</td><td>${saleQtyCell(s)}</td><td>${moneyCell(s.unitPrice)}</td><td class="money">${moneyCell(s.revenue)}</td><td>${moneyCell(s.unitCost)}</td><td>${moneyCell(s.totalCost)}</td><td class="${!cariPending && s.profit>=0?'profit-positive':''}${!cariPending && s.profit<0?'profit-negative':''}">${moneyCell(s.profit)}</td><td>${esc(s.note||'')}</td><td>${rowActions}</td><td>${lastCell}</td>
   </tr>`;
   }).join('');
   refreshTableLabels($('salesRows')?.closest('table')); syncBulkToolbars();
@@ -2220,6 +2341,8 @@ function maintenanceShareForProduct(product, qty, x = params()) {
 function saveSale(event) {
   event.preventDefault();
   if (!cloudReady) { toast('Bulut bağlantısı kurulmadan satış kaydedilemez.'); return; }
+  const customerName = readCustomerName('saleCustomer');
+  if (!customerName) { warnMissingCustomer('saleCustomer'); return; }
   if (!validateFormInputs($('saleForm'))) return;
   const product = productById($('saleProduct').value);
   if (!product) { toast('Önce ürün maliyet tablosuna ürün ekle.'); return; }
@@ -2237,14 +2360,15 @@ function saveSale(event) {
   const unitCost = calc(product, x).unit;
   const maintenanceShare = maintenanceShareForProduct(product, qty, x);
   const record = {
-    date: $('saleDate').value || todayISO(), productId:product.id, productName:product.name || 'İsimsiz ürün',
+    date: $('saleDate').value || todayISO(), customerName,
+    productId:product.id, productName:product.name || 'İsimsiz ürün',
     qty, unitPrice, unitCost, costSnapshot:snapshotForSale(product,x), maintenanceShare,
     revenue:qty*unitPrice, totalCost:qty*unitCost, profit:qty*(unitPrice-unitCost),
     note:$('saleNote').value.trim(), createdAt:Date.now()
   };
   commitSaleWithFinishedStock(record, [{productId:product.id, name:product.name || 'İsimsiz ürün', qty}], maintenanceShare)
     .then(() => {
-      $('saleQty').value = 1; $('saleNote').value = '';
+      $('saleQty').value = 1; $('saleNote').value = ''; $('saleCustomer').value = '';
       toast(`Satış buluta kaydedildi. Net kâr: ${money(record.profit)}${maintenanceShare > 0 ? ` · Bakım fonuna ${money(maintenanceShare)} aktarıldı` : ''}`);
     })
     .catch(error => { if(!['insufficient-finished-stock','offline-stock-guard','transaction-aborted'].includes(error.message)) cloudError(error, 'satış kaydetme'); });
@@ -2512,6 +2636,19 @@ $('costHistoryRows').addEventListener('click',event=>{
   });
 });
 $('saleForm').addEventListener('submit',saveSale);
+
+// Gecikmiş cari satış uyarı bandı: kapatma ve zorunlu müşteri alanı geri bildirimi.
+$('cariAlertClose')?.addEventListener('click', () => {
+  cariAlertDismissedSig = cariAlertSignature(cariOverdueSales());
+  $('cariAlert').hidden = true;
+});
+['saleCustomer','pkgCustomer'].forEach(id => {
+  const input = $(id);
+  if (!input) return;
+  input.addEventListener('input', () => {
+    if (input.value.trim()) { input.classList.remove('is-invalid'); input.removeAttribute('aria-invalid'); }
+  });
+});
 
 // Toplu seçim, yüzde zam ve geri alınabilir toplu silme.
 $('productRows').addEventListener('change',event=>{
@@ -3853,6 +3990,8 @@ function closeCariDateError() {
 function savePackageSale(event, cariSale = false) {
   event.preventDefault();
   if (!cloudReady) { toast('Bulut bağlantısı kurulmadan satış kaydedilemez.'); return; }
+  const customerName = readCustomerName('pkgCustomer');
+  if (!customerName) { warnMissingCustomer('pkgCustomer'); return; }
   // Cari satış yalnızca gelecek tarihli olabilir; aynı gün ve geçmiş tarihler reddedilir.
   const saleDate = $('pkgDate').value || todayISO();
   if (cariSale && saleDate <= todayISO()) {
@@ -3891,6 +4030,7 @@ function savePackageSale(event, cariSale = false) {
   const record = {
     type: 'package',
     date: saleDate,
+    customerName,
     packageName: typedName || '',
     productName: typedName || items.map(i => `${i.name} ×${i.qty}`).join(' + '),
     items,
@@ -3920,6 +4060,7 @@ function savePackageSale(event, cariSale = false) {
   commitSaleWithFinishedStock(record, requirements, cariSale ? 0 : maintenanceShare)
     .then(() => {
       PKG.items = [{productId:'', qty:1}];
+      $('pkgCustomer').value = '';
       $('pkgName').value = ''; $('pkgNote').value = ''; $('pkgQty').value = 1; $('pkgPrice').value = 0;
       $('pkgDate').value = todayISO();
       renderPackageRows();
@@ -4053,6 +4194,7 @@ function openRepackageSale(saleId) {
   PKG.items = items.length ? items : [{ productId: '', qty: 1 }];
   PKG.sig = null;
   $('pkgName').value = sale.packageName || '';
+  $('pkgCustomer').value = String(sale.customerName || '').trim();
   $('pkgQty').value = 1;
   $('pkgPrice').value = Math.max(0, Number(sale.unitPrice) || 0);
   $('pkgDate').value = todayISO();

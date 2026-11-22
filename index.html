@@ -93,6 +93,16 @@
           </div>
         </div>
       </div>
+      <div class="cari-alert" id="cariAlert" role="alert" aria-live="polite" hidden>
+        <div class="cari-alert-head">
+          <div>
+            <strong>Gecikmiş cari satış uyarısı</strong>
+            <span class="cari-alert-meta" id="cariAlertMeta"></span>
+          </div>
+          <button type="button" class="cari-alert-close" id="cariAlertClose" aria-label="Uyarıyı kapat" title="Uyarıyı kapat">×</button>
+        </div>
+        <ul class="cari-alert-list" id="cariAlertList"></ul>
+      </div>
       <header class="topbar">
         <div><p class="eyebrow">ÜRETİM • MALİYET • KÂR</p><h1>3D Baskı Maliyet Merkezi</h1><p class="subtitle">Üretim giderlerini hesapla, satışlarını kaydet ve haftalık/aylık kârını takip et.</p></div>
         <div class="top-actions"><button class="btn btn-primary" id="addProductTop"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Ürün ekle</button></div>
@@ -167,7 +177,8 @@
           <button type="button" class="sale-mode-btn active" role="tab" aria-selected="true" data-sale-mode="single">Tekli satış</button>
           <button type="button" class="sale-mode-btn" role="tab" aria-selected="false" data-sale-mode="package" id="addPackageSale"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg>Paket Satış Ekle</button>
         </div>
-        <form id="saleForm" class="sales-form">
+        <form id="saleForm" class="sales-form" novalidate>
+          <label class="field"><span>Müşteri adı</span><input id="saleCustomer" type="text" maxlength="80" required placeholder="Örn. Ahmet Yılmaz"></label>
           <label class="field"><span>Satılan ürün</span><select id="saleProduct" required></select></label>
           <label class="field"><span>Adet</span><input id="saleQty" type="number" min="1" max="100000" step="1" value="1" required></label>
           <label class="field"><span>Birim satış fiyatı (TL)</span><input id="salePrice" type="number" min="0" max="10000000" step="0.01" value="0" required></label>
@@ -176,6 +187,7 @@
           <button class="btn btn-primary sale-submit" type="submit"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Satışı kaydet</button>
         </form>
         <form id="packageForm" class="sales-form package-form" hidden novalidate>
+          <label class="field"><span>Müşteri adı</span><input id="pkgCustomer" type="text" maxlength="80" required placeholder="Örn. Ahmet Yılmaz"></label>
           <label class="field"><span>Paket adı (isteğe bağlı)</span><input id="pkgName" type="text" maxlength="60" placeholder="Örn. Başlangıç seti"></label>
           <label class="field"><span>Paket adedi</span><input id="pkgQty" type="number" min="1" max="100000" step="1" value="1"></label>
           <label class="field"><span>Paket satış fiyatı (TL / paket)</span><input id="pkgPrice" type="number" min="0" max="10000000" step="0.01" value="0"></label>
@@ -232,7 +244,7 @@
           <span id="salesRange" class="muted"></span>
         </div>
         <div class="bulk-toolbar" id="salesBulkToolbar" hidden><span id="salesBulkCount">0 satış seçildi</span><button class="btn btn-danger" id="salesBulkDelete" type="button">Seçilenleri sil</button><button class="btn btn-ghost" id="salesBulkClear" type="button">Seçimi temizle</button></div><div class="table-wrap"><table class="sales-table">
-          <thead><tr><th><input type="checkbox" id="salesSelectAll" aria-label="Tüm satışları seç"></th><th>Tarih</th><th>Ürün</th><th>Adet</th><th>Birim fiyat</th><th>Ciro</th><th>Birim maliyet</th><th>Toplam maliyet</th><th>Net kâr</th><th>Not</th><th>Detay</th><th></th></tr></thead>
+          <thead><tr><th><input type="checkbox" id="salesSelectAll" aria-label="Tüm satışları seç"></th><th>Tarih</th><th>Müşteri</th><th>Ürün</th><th>Adet</th><th>Birim fiyat</th><th>Ciro</th><th>Birim maliyet</th><th>Toplam maliyet</th><th>Net kâr</th><th>Not</th><th>Detay</th><th></th></tr></thead>
           <tbody id="salesRows"></tbody>
         </table></div>
         <div id="salesEmpty" class="empty-state">Henüz satış kaydı yok. İlk satışını yukarıdaki formdan ekleyebilirsin.</div>
@@ -586,8 +598,10 @@
        gizlilik/tracking koruması depolama erişimini engellemez. -->
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <!-- Cari vade uyarılarının e-posta bildirimi için EmailJS (yalnızca koşul sağlandığında çağrılır). -->
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
   <script src="firebase-config.js"></script>
   <!-- Sürüm parametresi, tarayıcının eski script.js önbelleğini kullanmasını engeller. -->
-  <script src="script.js?v=20261122-1"></script>
+  <script src="script.js?v=20261123-1"></script>
 </body>
 </html>
