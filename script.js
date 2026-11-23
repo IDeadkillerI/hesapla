@@ -10,7 +10,7 @@ const $ = id => document.getElementById(id);
 const CLOUD_ROOT = 'printcost';
 // EmailJS — yalnızca vadesi gelmiş/gecikmiş bekleyen cari kayıt varsa ve o gün
 // henüz mail gönderilmediyse kullanılır. Sesli uyarı yoktur.
-const EMAILJS_PUBLIC_KEY = '8eKPDehzKtl3uxIsC';
+const EMAILJS_PUBLIC_KEY = '8eKPDehzKtl3uxlsC';
 const EMAILJS_SERVICE_ID = 'service_6dg8ev5';
 const EMAILJS_TEMPLATE_ID = 'template_zymhg9q';
 const CARI_MAIL_STORAGE_PREFIX = 'printcost_cari_mail_';
