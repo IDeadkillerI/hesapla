@@ -2578,3 +2578,19 @@ input.is-invalid:focus{outline:none}
 }
 .confirm-card .confirm-password input:focus-visible{outline:2px solid rgba(var(--accent-rgb),.55);outline-offset:1px}
 .confirm-card p.confirm-password-error{margin:0;color:var(--rose);font-size:12px;font-weight:600;line-height:1.4}
+
+/* ---------- Cari satış: vade erteleme penceresi ---------- */
+.cari-postpone-field{margin-top:14px;display:grid;gap:8px;text-align:left}
+.cari-postpone-field[hidden]{display:none}
+.cari-postpone-field .field{display:grid;gap:6px}
+.cari-postpone-field .field>span{font-size:11px;font-weight:700;letter-spacing:.02em;color:var(--muted)}
+.confirm-card .cari-postpone-field input{
+  width:100%;min-height:44px;padding:0 12px;
+  border:1px solid var(--line-strong);border-radius:var(--r-md);
+  background:rgba(var(--ov),.045);color:var(--text);
+  font-family:var(--font-ui);
+}
+.confirm-card .cari-postpone-field input:focus-visible{outline:2px solid rgba(var(--accent-rgb),.55);outline-offset:1px}
+.confirm-card .cari-postpone-field input[aria-invalid="true"]{border-color:var(--rose)}
+.confirm-card p.cari-postpone-error{margin:0;color:var(--rose);font-size:12px;font-weight:600;line-height:1.4}
+.confirm-card button:disabled{opacity:.6;cursor:progress}

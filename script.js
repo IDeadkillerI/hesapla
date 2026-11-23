@@ -2257,7 +2257,7 @@ function renderSales() {
     const cariPending = isCariPending(s);
     const dash = '<span class="muted">—</span>';
     const moneyCell = value => cariPending ? dash : money(value);
-    const rowActions = `<div class="sale-actions"><button class="detail-btn" data-sale-detail="${esc(s.id)}" type="button">Fiyat detayı</button>${!cariPending && s.type==='package' ? `<button class="detail-btn resell-btn" data-sale-resell="${esc(s.id)}" type="button">Tekrar sat</button>` : ''}${cariPending ? `<button class="detail-btn cari-realize-btn" data-sale-realize="${esc(s.id)}" type="button">Satışı gerçekleştir</button>` : ''}</div>`;
+    const rowActions = `<div class="sale-actions"><button class="detail-btn" data-sale-detail="${esc(s.id)}" type="button">Fiyat detayı</button>${!cariPending && s.type==='package' ? `<button class="detail-btn resell-btn" data-sale-resell="${esc(s.id)}" type="button">Tekrar sat</button>` : ''}${cariPending ? `<button class="detail-btn cari-postpone-btn" data-sale-postpone="${esc(s.id)}" type="button" title="Vade tarihini ileri bir tarihe ertele">Tarihi ertele</button><button class="detail-btn cari-realize-btn" data-sale-realize="${esc(s.id)}" type="button">Satışı gerçekleştir</button>` : ''}</div>`;
     const lastCell = cariPending
       ? `<button class="delete-btn cari-cancel-btn" data-sale-cari-cancel="${esc(s.id)}" title="Cari satışı iptal et" aria-label="Cari satışı iptal et">Cari satış iptal</button>`
       : `<button class="delete-btn" data-sale-delete="${esc(s.id)}" title="Satış kaydını sil" aria-label="Satış kaydını sil">×</button>`;
@@ -2555,6 +2555,8 @@ $('salesRows').addEventListener('click',event=>{
   if(detailButton){showSaleDetails(detailButton.dataset.saleDetail);return;}
   const resellButton=event.target.closest('[data-sale-resell]');
   if(resellButton){openRepackageSale(resellButton.dataset.saleResell);return;}
+  const postponeButton=event.target.closest('[data-sale-postpone]');
+  if(postponeButton){openCariPostpone(postponeButton.dataset.salePostpone);return;}
   const realizeButton=event.target.closest('[data-sale-realize]');
   if(realizeButton){realizeCariSale(realizeButton.dataset.saleRealize);return;}
   const cariCancelButton=event.target.closest('[data-sale-cari-cancel]');
@@ -4104,6 +4106,145 @@ function cancelCariSale(saleId) {
       .catch(error => { if (!['transaction-aborted'].includes(error.message)) cloudError(error, 'cari satışı iptal etme'); });
   });
 }
+/* ---------- Cari satış: vade tarihini erteleme ----------
+   1) "Tarihi ertele" -> tarih seçme penceresi, 2) doğrulama (geçmiş/bugün/aynı tarih reddedilir),
+   3) onay adımı, 4) onaydan sonra yalnızca bu cari kaydın `date` alanı güncellenir.
+   Yazma, kaydın hâlâ bekleyen cari olduğunu kontrol eden tek bir transaction'dır; böylece başka bir
+   sekmede gerçekleştirilmiş/iptal edilmiş bir kaydın tarihi yanlışlıkla değişmez. */
+let cariPostponeState = null; // { id, oldDate, newDate, step: 'pick' | 'confirm', busy, previous }
+function cariIsoToTR(iso) { return String(iso || '').split('-').reverse().join('.'); }
+function cariTomorrowISO() {
+  const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function cariPostponeValidate(value, oldDate) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) || !localDate(value)) return 'Lütfen yeni bir vade tarihi seç.';
+  const today = todayISO();
+  if (value < today) return 'Geçmiş bir tarihe erteleme yapılamaz. Lütfen bugünden sonraki bir tarih seç.';
+  if (value === today) return 'Bugünün tarihi seçilemez. Yeni vade tarihi bugünden sonraki bir gün olmalı.';
+  if (value === String(oldDate)) return 'Seçtiğin tarih mevcut vade tarihiyle aynı. Farklı bir tarih seç.';
+  return '';
+}
+function cariPostponeShowError(message) {
+  const box = $('cariPostponeError'), input = $('cariPostponeDate');
+  if (box) { box.textContent = message || ''; box.hidden = !message; }
+  if (input) { if (message) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid'); }
+}
+function renderCariPostpone() {
+  const st = cariPostponeState; if (!st) return;
+  const record = sales.find(s => String(s.id) === st.id);
+  const label = record ? `${saleCustomerName(record)} · ${record.productName || 'Cari satış'}` : 'Cari satış';
+  const confirmStep = st.step === 'confirm';
+  $('cariPostponeTitle').textContent = confirmStep ? 'Tarih değişikliğini onayla' : 'Vade tarihini ertele';
+  $('cariPostponeInfo').textContent = confirmStep
+    ? `“${label}” kaydının vade tarihi ${cariIsoToTR(st.oldDate)} yerine ${cariIsoToTR(st.newDate)} olarak güncellenecek. Onaylıyor musun?`
+    : `“${label}” · Mevcut vade tarihi: ${cariIsoToTR(st.oldDate)}. Yeni vade tarihini seç; geçmiş bir tarih seçilemez.`;
+  $('cariPostponeForm').hidden = confirmStep;
+  $('cariPostponeCancel').textContent = confirmStep ? 'Geri dön' : 'Vazgeç';
+  $('cariPostponeOk').textContent = confirmStep ? 'Onayla' : 'Tamam';
+  $('cariPostponeOk').disabled = !!st.busy;
+  $('cariPostponeCancel').disabled = !!st.busy;
+}
+function openCariPostpone(saleId) {
+  const record = sales.find(s => String(s.id) === String(saleId));
+  if (!record || !isCariPending(record)) { toast('Ertelenecek bekleyen cari satış bulunamadı.', 'warning'); return; }
+  if (!cloudReady || !rootRef) { toast('Bulut bağlantısı kurulmadan vade tarihi değiştirilemez.'); return; }
+  const modal = $('cariPostponeModal'), input = $('cariPostponeDate');
+  if (!modal || !input) return;
+  cariPostponeState = { id: String(record.id), oldDate: String(record.date || ''), newDate: '', step: 'pick', busy: false, previous: document.activeElement };
+  input.min = cariTomorrowISO();
+  input.value = '';
+  cariPostponeShowError('');
+  renderCariPostpone();
+  modal.hidden = false;
+  setTimeout(() => input.focus(), 0);
+}
+function closeCariPostpone() {
+  const modal = $('cariPostponeModal'), st = cariPostponeState;
+  if (modal) modal.hidden = true;
+  cariPostponeState = null;
+  if (st && st.previous && st.previous.focus && document.contains(st.previous)) st.previous.focus({ preventScroll: true });
+}
+function cariPostponeBack() {
+  const st = cariPostponeState; if (!st || st.busy) return;
+  if (st.step === 'confirm') {
+    st.step = 'pick';
+    renderCariPostpone();
+    setTimeout(() => { const input = $('cariPostponeDate'); if (input) input.focus(); }, 0);
+  } else closeCariPostpone();
+}
+function cariPostponeNext() {
+  const st = cariPostponeState; if (!st || st.busy) return;
+  if (st.step === 'pick') {
+    const value = $('cariPostponeDate').value;
+    const error = cariPostponeValidate(value, st.oldDate);
+    if (error) { cariPostponeShowError(error); $('cariPostponeDate').focus(); return; }
+    cariPostponeShowError('');
+    st.newDate = value; st.step = 'confirm';
+    renderCariPostpone();
+    setTimeout(() => $('cariPostponeOk').focus(), 0);
+    return;
+  }
+  commitCariPostpone();
+}
+function commitCariPostpone() {
+  const st = cariPostponeState; if (!st || st.busy) return;
+  if (!cloudReady || !salesRef) { toast('Bulut bağlantısı kurulmadan vade tarihi değiştirilemez.'); return; }
+  if (!firebaseConnected || navigator.onLine === false) {
+    toast('Bağlantı yok. Vade tarihi bağlantı gelene kadar değiştirilemez.', 'warning');
+    return;
+  }
+  const { id, oldDate, newDate } = st;
+  let outcome = 'done';
+  st.busy = true; renderCariPostpone();
+  salesRef.child(id).transaction(current => {
+    outcome = 'done';
+    if (current === null) { outcome = 'missing'; return current; }
+    if (!(current.cari && current.cariState !== 'realized')) { outcome = 'notPending'; return; }
+    if (cariPostponeValidate(newDate, current.date)) { outcome = 'invalid'; return; }
+    return {
+      ...current,
+      date: newDate,
+      cariOriginalDate: current.cariOriginalDate || current.date || '',
+      cariPostponedAt: Date.now(),
+      cariPostponeCount: (Number(current.cariPostponeCount) || 0) + 1
+    };
+  }, (error, committed, snapshot) => {
+    if (cariPostponeState === st) { st.busy = false; renderCariPostpone(); }
+    if (error) { cloudError(error, 'vade tarihini erteleme'); return; }
+    const value = snapshot && snapshot.val();
+    if (committed && value && value.date === newDate) {
+      if (cariPostponeState === st) closeCariPostpone();
+      toast(`Vade tarihi ${cariIsoToTR(oldDate)} yerine ${cariIsoToTR(newDate)} olarak güncellendi.`, 'success', { title: 'Vade ertelendi' });
+      return;
+    }
+    if (cariPostponeState === st) closeCariPostpone();
+    if (outcome === 'notPending') toast('Bu cari satış artık beklemede değil (gerçekleştirilmiş veya iptal edilmiş olabilir). Tarih değiştirilmedi.', 'warning');
+    else if (outcome === 'missing' || (committed && !value)) toast('Cari satış kaydı bulunamadı.', 'warning');
+    else if (outcome === 'invalid') toast('Seçilen tarih artık geçerli değil. Lütfen yeniden dene.', 'warning');
+    else toast('Vade tarihi güncellenemedi. Lütfen tekrar dene.', 'warning');
+  }, false);
+}
+function initCariPostpone() {
+  const modal = $('cariPostponeModal');
+  if (!modal) return;
+  $('cariPostponeOk').addEventListener('click', cariPostponeNext);
+  $('cariPostponeCancel').addEventListener('click', cariPostponeBack);
+  $('cariPostponeDate').addEventListener('input', () => cariPostponeShowError(''));
+  modal.addEventListener('mousedown', event => { if (event.target === modal && cariPostponeState && !cariPostponeState.busy) closeCariPostpone(); });
+  modal.addEventListener('keydown', event => {
+    if (!cariPostponeState) return;
+    if (event.key === 'Escape') { event.preventDefault(); if (!cariPostponeState.busy) closeCariPostpone(); }
+    else if (event.key === 'Enter' && event.target && event.target.id === 'cariPostponeDate') { event.preventDefault(); cariPostponeNext(); }
+    else if (event.key === 'Tab') {
+      const list = [$('cariPostponeDate'), $('cariPostponeCancel'), $('cariPostponeOk')].filter(el => el && !el.disabled && !el.closest('[hidden]'));
+      if (!list.length) return;
+      const i = list.indexOf(document.activeElement);
+      const next = event.shiftKey ? (i <= 0 ? list.length - 1 : i - 1) : (i + 1) % list.length;
+      event.preventDefault(); list[next].focus();
+    }
+  });
+}
 function saleNameCell(sale) {
   const cariBadge = isCariPending(sale) ? '<span class="sale-badge cari">Cari · bekliyor</span>' : '';
   if (sale.type !== 'package') return `${cariBadge}${esc(sale.productName)}`;
@@ -4207,6 +4348,7 @@ function initPackageUi() {
   form.addEventListener('submit', savePackageSale);
   if ($('cariSaleBtn')) $('cariSaleBtn').addEventListener('click', () => savePackageSale({ preventDefault() {} }, true));
   if ($('cariErrorOk')) $('cariErrorOk').addEventListener('click', closeCariDateError);
+  initCariPostpone();
   $('pkgDate').value = todayISO();
 }
 

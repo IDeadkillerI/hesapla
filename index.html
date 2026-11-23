@@ -18,7 +18,7 @@
       if(localStorage.getItem('pc_sidebar')==='collapsed')document.documentElement.setAttribute('data-sb','collapsed');
     }catch(e){document.documentElement.setAttribute('data-theme','dark')}})();
   </script>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=20261123-5">
 </head>
 <body class="auth-locked">
   <div class="app-shell">
@@ -593,6 +593,22 @@
       </div>
     </section>
   </div>
+  <!-- Cari satış vade erteleme: tarih seçimi -> doğrulama -> onay adımı (aynı pencerede). -->
+  <div class="confirm-backdrop" id="cariPostponeModal" hidden>
+    <section class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="cariPostponeTitle" aria-describedby="cariPostponeInfo">
+      <span class="confirm-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 3.5v3M16.5 3.5v3M4.5 9.5h15"/><path d="M6 5.5h12a1.5 1.5 0 0 1 1.5 1.5v11.5A1.5 1.5 0 0 1 18 20H6a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 6 5.5Z"/></svg></span>
+      <h3 id="cariPostponeTitle">Vade tarihini ertele</h3>
+      <p id="cariPostponeInfo"></p>
+      <div class="cari-postpone-field" id="cariPostponeForm">
+        <label class="field"><span>Yeni vade tarihi</span><input id="cariPostponeDate" type="date"></label>
+        <p class="cari-postpone-error" id="cariPostponeError" role="alert" hidden></p>
+      </div>
+      <div class="confirm-actions">
+        <button class="btn btn-ghost" id="cariPostponeCancel" type="button">Vazgeç</button>
+        <button class="btn btn-primary" id="cariPostponeOk" type="button">Tamam</button>
+      </div>
+    </section>
+  </div>
   <!-- SheetJS yereldir (vendor/xlsx.full.min.js) ve yalnızca Excel dışa aktarımında
        script.js tarafından isteğe bağlı yüklenir. CDN kullanılmadığı için tarayıcı
        gizlilik/tracking koruması depolama erişimini engellemez. -->
@@ -600,6 +616,6 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
   <script src="firebase-config.js"></script>
   <!-- Sürüm parametresi, tarayıcının eski script.js önbelleğini kullanmasını engeller. -->
-  <script src="script.js?v=20261123-4"></script>
+  <script src="script.js?v=20261123-5"></script>
 </body>
 </html>
