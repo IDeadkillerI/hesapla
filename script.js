@@ -8,12 +8,6 @@ const $ = id => document.getElementById(id);
  * Veri yolu: printcost/{params|filamentStock|filamentPurchases|products|sales|costHistory}
  * ========================================================= */
 const CLOUD_ROOT = 'printcost';
-// EmailJS — yalnızca vadesi gelmiş/gecikmiş bekleyen cari kayıt varsa ve o gün
-// henüz mail gönderilmediyse kullanılır. Sesli uyarı yoktur.
-const EMAILJS_PUBLIC_KEY = '8eKPDehzKtl3uxlsC';
-const EMAILJS_SERVICE_ID = 'service_6dg8ev5';
-const EMAILJS_TEMPLATE_ID = 'template_zymhg9q';
-const CARI_MAIL_STORAGE_PREFIX = 'printcost_cari_mail_';
 
 // Sol menüdeki her seçenek ayrı bir sayfa görünümü açar.
 function showPage(pageId) {
@@ -62,8 +56,6 @@ let sales = [];
 let productSortMode = 'default';
 // Kapatılan uyarı bandının hangi kayıt kümesi için kapatıldığı; veri değişince yeniden açılır.
 let cariAlertDismissedSig = '';
-let cariEmailInFlight = false;
-let cariEmailMemoryKey = '';
 let costHistory = [];
 // Üretim kayıtları (printcost/productionLogs). Satıştan bağımsız üretim hareketleri.
 let productionLogs = [];
@@ -2194,17 +2186,7 @@ function cariDelayLabel(sale) {
 function cariAlertSignature(records) {
   return `${todayISO()}|${records.map(s => s.id).join(',')}`;
 }
-function hasCariMailBeenSent(key) {
-  if (cariEmailMemoryKey === key) return true;
-  try { return localStorage.getItem(key) === '1'; }
-  catch (e) { return false; }
-}
-function markCariMailSent(key) {
-  cariEmailMemoryKey = key;
-  try { localStorage.setItem(key, '1'); } catch (e) { /* depolama kapalıysa oturum içi koruma yeterli */ }
-}
-/* Gecikmiş cari kayıtları için görsel uyarı bandını günceller ve koşullar
-   uygunsa günde en fazla bir kez EmailJS bildirimi gönderir. */
+/* Gecikmiş cari kayıtları için görsel uyarı bandını günceller. */
 function refreshCariAlerts() {
   const overdue = cariOverdueSales();
   const banner = $('cariAlert');
@@ -2232,39 +2214,6 @@ function refreshCariAlerts() {
     }
     banner.hidden = false;
   }
-  maybeSendCariEmail(overdue);
-}
-/* Uygun kayıt yoksa çağrılmaz. Aynı gün başarılı gönderim yapıldıysa tekrar
-   gönderilmez; başarılı gönderim tarih bazlı localStorage anahtarına yazılır. */
-function maybeSendCariEmail(overdue) {
-  if (!overdue || !overdue.length) return;               // koşul yoksa EmailJS'e hiç dokunma
-  if (cariEmailInFlight) return;
-  const key = `${CARI_MAIL_STORAGE_PREFIX}${todayISO()}`;
-  if (hasCariMailBeenSent(key)) return;
-  const emailjsLib = window.emailjs;
-  if (!emailjsLib || typeof emailjsLib.send !== 'function') return;
-  const total = overdue.reduce((sum, sale) => sum + (Number(sale.revenue) || 0), 0);
-  const ozet = overdue.map((sale, index) =>
-    `${index + 1}) Müşteri: ${saleCustomerName(sale)} | Tutar: ${money(sale.revenue)} | Vade: ${sale.date} | ${cariDelayLabel(sale)}`
-  ).join('\n');
-  cariEmailInFlight = true;
-  emailjsLib.send(
-    EMAILJS_SERVICE_ID,
-    EMAILJS_TEMPLATE_ID,
-    {
-      tarih: new Date().toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric', weekday: 'long' }),
-      kayit_sayisi: String(overdue.length),
-      toplam_tutar: money(total),
-      cari_ozet: ozet
-    },
-    { publicKey: EMAILJS_PUBLIC_KEY }
-  ).then(() => {
-    markCariMailSent(key);
-  }).catch(error => {
-    console.warn('Cari vade e-posta bildirimi gönderilemedi:', error);
-  }).finally(() => {
-    cariEmailInFlight = false;
-  });
 }
 function filteredSales() {
   const period = $('salesPeriod').value;
