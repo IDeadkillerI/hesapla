@@ -11,14 +11,14 @@
   <script>
     (function(){try{
       var t=localStorage.getItem('pc_theme');
-      if(['dark','light','midnight','glass','glass-2','lilac-haze','olive','carbon','indigo','modern-dark','clean-light','forest','midnight-blue','admin-v2','dashboard-v26'].indexOf(t)<0)t='dark';
+      if(['dark','light','midnight','glass','glass-2','lilac-haze','olive','carbon','indigo','modern-dark','clean-light','forest','midnight-blue','admin-v2','dashboard-v26','sand','petrol','burgundy'].indexOf(t)<0)t='dark';
       document.documentElement.setAttribute('data-theme',t);
       var m=document.querySelector('meta[name="theme-color"]');
-      if(m)m.setAttribute('content',{dark:'#09090b',light:'#f4f5f7',midnight:'#050b1a',glass:'#0b1030','glass-2':'#0e0f11','lilac-haze':'#1e1c24',olive:'#0b0e08',carbon:'#070707',indigo:'#0d0f18','modern-dark':'#08090d','clean-light':'#f7f8fa',forest:'#07130f','midnight-blue':'#050b1a','admin-v2':'#0b1329','dashboard-v26':'#f8fafc'}[t]);
+      if(m)m.setAttribute('content',{dark:'#09090b',light:'#f4f5f7',midnight:'#050b1a',glass:'#0b1030','glass-2':'#0e0f11','lilac-haze':'#1e1c24',olive:'#0b0e08',carbon:'#070707',indigo:'#0d0f18','modern-dark':'#08090d','clean-light':'#f7f8fa',forest:'#07130f','midnight-blue':'#050b1a','admin-v2':'#0b1329','dashboard-v26':'#f8fafc',sand:'#f6f1e9',petrol:'#eef4f4',burgundy:'#1b1014'}[t]);
       if(localStorage.getItem('pc_sidebar')==='collapsed')document.documentElement.setAttribute('data-sb','collapsed');
     }catch(e){document.documentElement.setAttribute('data-theme','dark')}})();
   </script>
-  <link rel="stylesheet" href="style.css?v=20261123-5">
+  <link rel="stylesheet" href="style.css?v=20261123-6">
 </head>
 <body class="auth-locked">
   <div class="app-shell">
@@ -90,6 +90,10 @@
             <button class="theme-option" type="button" role="radio" data-theme-choice="carbon" aria-checked="false"><span class="theme-swatch" data-t="carbon"></span><span><b>Karbon &amp; neon</b><small>Siyah karbon · neon turuncu</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
             <button class="theme-option" type="button" role="radio" data-theme-choice="indigo" aria-checked="false"><span class="theme-swatch" data-t="indigo"></span><span><b>Slate &amp; indigo</b><small>Arduvaz gri · mor vurgu</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
             <button class="theme-option" type="button" role="radio" data-theme-choice="lilac-haze" aria-checked="false"><span class="theme-swatch" data-t="lilac-haze"></span><span><b>Lilac Haze</b><small>Lila %60 · grafit gece %30 · asit yeşili %10</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
+            <p class="theme-menu-title">UX ODAKLI YENİ TEMALAR</p>
+            <button class="theme-option" type="button" role="radio" data-theme-choice="sand" aria-checked="false"><span class="theme-swatch" data-t="sand"></span><span><b>Kum &amp; Terakota</b><small>Sıcak krem zemin · okunaklı terakota vurgu</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
+            <button class="theme-option" type="button" role="radio" data-theme-choice="petrol" aria-checked="false"><span class="theme-swatch" data-t="petrol"></span><span><b>Petrol &amp; Sis</b><small>Soğuk açık zemin · petrol yeşili vurgu</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
+            <button class="theme-option" type="button" role="radio" data-theme-choice="burgundy" aria-checked="false"><span class="theme-swatch" data-t="burgundy"></span><span><b>Bordo &amp; Altın</b><small>Koyu şarap zemin · şampanya altını vurgu</small></span><svg class="theme-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
           </div>
         </div>
       </div>
@@ -616,6 +620,6 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
   <script src="firebase-config.js"></script>
   <!-- Sürüm parametresi, tarayıcının eski script.js önbelleğini kullanmasını engeller. -->
-  <script src="script.js?v=20261123-5"></script>
+  <script src="script.js?v=20261123-6"></script>
 </body>
 </html>

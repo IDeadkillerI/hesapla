@@ -33,6 +33,15 @@ function showPage(pageId) {
   requestAnimationFrame(syncSlidingPills);
   if (pageId === 'maintenance' && typeof playPriceBars === 'function') playPriceBars(true);
   if (pageId === 'sales' && typeof playSalesChart === 'function') playSalesChart(true);
+  // Mobilde üst menü sabit ve yatay kaydırılabilir; etkin sekmeyi görünür alanın ortasına getir.
+  const activeLink = document.querySelector('.sidebar nav a.active');
+  const navEl = activeLink && activeLink.parentElement;
+  if (navEl && navEl.scrollWidth > navEl.clientWidth + 1) {
+    const a = activeLink.getBoundingClientRect(), n = navEl.getBoundingClientRect();
+    const left = navEl.scrollLeft + (a.left - n.left) - (n.width - a.width) / 2;
+    const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    navEl.scrollTo({ left: Math.max(0, left), behavior: reduce ? 'auto' : 'smooth' });
+  }
 }
 document.querySelectorAll('.sidebar nav a[data-page]').forEach(link => {
   link.addEventListener('click', event => {
@@ -3197,7 +3206,7 @@ document.addEventListener('keydown', event => {
    Tercihler (tema, kenar çubuğu, oturum) tarayıcıda küçük anahtarlar olarak
    tutulur; iş verileri hâlâ yalnızca Firebase'dedir.
    ========================================================= */
-const THEMES = { dark:'#09090b', light:'#f4f5f7', midnight:'#050b1a', glass:'#0b1030', 'glass-2':'#0e0f11', 'lilac-haze':'#1e1c24', olive:'#0b0e08', carbon:'#070707', indigo:'#0d0f18', 'modern-dark':'#08090d', 'clean-light':'#f7f8fa', forest:'#07130f', 'midnight-blue':'#050b1a', 'admin-v2':'#0b1329', 'dashboard-v26':'#f8fafc' };
+const THEMES = { dark:'#09090b', light:'#f4f5f7', midnight:'#050b1a', glass:'#0b1030', 'glass-2':'#0e0f11', 'lilac-haze':'#1e1c24', olive:'#0b0e08', carbon:'#070707', indigo:'#0d0f18', 'modern-dark':'#08090d', 'clean-light':'#f7f8fa', forest:'#07130f', 'midnight-blue':'#050b1a', 'admin-v2':'#0b1329', 'dashboard-v26':'#f8fafc', sand:'#f6f1e9', petrol:'#eef4f4', burgundy:'#1b1014' };
 function prefGet(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
 function prefSet(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* gizli mod vb. */ } }
 function prefDel(key) { try { localStorage.removeItem(key); } catch (e) { /* yoksay */ } }
